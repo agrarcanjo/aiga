@@ -1,0 +1,94 @@
+{
+  "name": "@clone-perssua/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "build": "vite build",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test electron/**/*.test.cjs",
+    "test:e2e": "node --test electron/**/*.e2e.test.cjs",
+    "pack:win": "vite build && node electron/ci-sign-check.cjs && electron-builder --win --dir",
+    "dist:win": "vite build && node electron/ci-sign-check.cjs && electron-builder --win --publish never"
+  },
+  "build": {
+    "appId": "com.cloneperssua.desktop",
+    "productName": "Clone Perssua",
+    "copyright": "Copyright © 2025 Clone Perssua",
+    "directories": {
+      "output": "release/${version}",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "!electron/**/*.test.cjs",
+      "!electron/**/*.e2e.test.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/",
+        "to": "resources/",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signingHashAlgorithms": [
+        "sha256"
+      ],
+      "sign": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Clone Perssua",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": null
+  },
+  "dependencies": {
+    "@clone-perssua/shared-types": "workspace:*",
+    "@google/generative-ai": "^0.24.1",
+    "electron-updater": "6.3.9",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@typescript-eslint/eslint-plugin": "^8.17.0",
+    "@typescript-eslint/parser": "^8.17.0",
+    "@vitejs/plugin-react": "^4.3.3",
+    "concurrently": "^9.1.0",
+    "electron": "^33.2.0",
+    "electron-builder": "25.1.8",
+    "eslint": "^9.16.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.14",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "wait-on": "^8.0.1"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "clone-perssua",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Monorepo do assistente desktop Clone Perssua",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  },
+  "scripts": {
+    "dev": "corepack pnpm --filter @clone-perssua/desktop dev",
+    "build": "corepack pnpm --filter @clone-perssua/desktop build",
+    "lint": "corepack pnpm --filter @clone-perssua/desktop lint",
+    "typecheck": "corepack pnpm --filter @clone-perssua/desktop typecheck",
+    "test": "corepack pnpm --filter @clone-perssua/desktop test",
+    "test:e2e": "corepack pnpm --filter @clone-perssua/desktop test:e2e",
+    "pack:win": "corepack pnpm --filter @clone-perssua/desktop pack:win",
+    "dist:win": "corepack pnpm --filter @clone-perssua/desktop dist:win",
+    "beta:gates": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/beta/run-beta-gates.ps1",
+    "beta:triage:today": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/beta/start-triage-day.ps1",
+    "beta:publish:check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/beta/publish-checklist.ps1"
+  }
+}

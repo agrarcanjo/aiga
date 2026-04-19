@@ -1,0 +1,13 @@
+pilot_id,name,email,role,os_version,ram_gb,cpu,timezone,onboarded,installed_version,last_feedback_date,status,notes
+P01,,,,Windows 11,16,,,No,,,Pending,
+P02,,,,Windows 11,16,,,No,,,Pending,
+P03,,,,Windows 11,16,,,No,,,Pending,
+P04,,,,Windows 10,8,,,No,,,Pending,
+P05,,,,Windows 10,8,,,No,,,Pending,
+P06,,,,Windows 11,16,,,No,,,Pending,
+P07,,,,Windows 11,16,,,No,,,Pending,
+P08,,,,Windows 10,8,,,No,,,Pending,
+P09,,,,Windows 11,32,,,No,,,Pending,
+P10,,,,Windows 11,16,,,No,,,Pending,
+P11,,,,Windows 10,8,,,No,,,Pending,
+P12,,,,Windows 11,16,,,No,,,Pending,
