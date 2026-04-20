@@ -98,7 +98,14 @@ function createLocalLogger(options = {}) {
 
     const safeMeta = meta ? redactSecrets(meta) : undefined;
     const serializedMeta = safeMeta ? ` | ${JSON.stringify(safeMeta)}` : "";
-    const line = `${new Date().toISOString()} | ${level.toUpperCase()} | ${message}${serializedMeta}\n`;
+    const saoPauloTime = new Intl.DateTimeFormat("sv-SE", {
+      timeZone: "America/Sao_Paulo",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      fractionalSecondDigits: 3,
+      hour12: false
+    }).format(new Date()).replace(" ", "T") + "-03:00";
+    const line = `${saoPauloTime} | ${level.toUpperCase()} | ${message}${serializedMeta}\n`;
 
     fs.appendFileSync(logFilePath, line, "utf-8");
   }

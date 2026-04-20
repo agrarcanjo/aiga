@@ -40,8 +40,12 @@ function createWindow() {
   logger.info("Creating main browser window");
 
   mainWindowRef = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: 400,
+    height: 300,
+    minWidth: 500,
+    minHeight: 240,
+    frame: false,
+    title: "AIGA",
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -136,6 +140,7 @@ app.whenReady().then(() => {
     sttAdapter,
     autoUpdateService,
     stealthWindowService,
+    getMainWindow: () => mainWindowRef,
     emitRendererEvent: emitToAllWindows
   });
   shortcutService.refreshShortcuts();

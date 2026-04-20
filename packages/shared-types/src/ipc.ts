@@ -134,12 +134,14 @@ export interface StealthSetModeRequest {
 
 export interface StealthSetModeResponse {
   enabled: boolean;
+  opacity: number;
   appliedAtIso: string;
 }
 
 export interface StealthStateChangedEvent {
   enabled: boolean;
   hardening: StealthHardening;
+  opacity: number;
   source: "ipc" | "shortcut";
   appliedAtIso: string;
 }
@@ -384,6 +386,9 @@ export interface DesktopApi {
   installAutoUpdate(): Promise<AutoUpdateInstallResponse>;
   rollbackAutoUpdate(payload: AutoUpdateRollbackRequest): Promise<AutoUpdateRollbackResponse>;
   confirmAutoUpdateHealth(): Promise<AutoUpdateConfirmHealthResponse>;
+  quitApp(): Promise<void>;
+  minimizeWindow(): Promise<void>;
+  setWindowOpacity(opacity: number): Promise<{ opacity: number }>;
   onScreenshotQueueUpdated(listener: (payload: ScreenshotQueueUpdatedEvent) => void): () => void;
   onStealthStateChanged(listener: (payload: StealthStateChangedEvent) => void): () => void;
   onAutoUpdateEvent(listener: (payload: AutoUpdateEvent) => void): () => void;

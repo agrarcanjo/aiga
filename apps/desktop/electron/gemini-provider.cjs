@@ -34,7 +34,7 @@ function buildGeminiParts(ask, screenshots) {
  */
 function createGeminiProvider(options) {
   const logger = options.logger;
-  const modelName = options.modelName || process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const modelName = options.modelName || process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
   async function streamAskResponse(input) {
     const genAI = new GoogleGenerativeAI(input.apiKey);

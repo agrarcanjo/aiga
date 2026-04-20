@@ -63,5 +63,8 @@ contextBridge.exposeInMainWorld("desktopApi", {
     return () => {
       ipcRenderer.removeListener(autoUpdateEventChannel, wrappedListener);
     };
-  }
+  },
+  quitApp: () => ipcRenderer.invoke("app:quit"),
+  minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
+  setWindowOpacity: (opacity) => ipcRenderer.invoke("window:set-opacity", { opacity })
 });

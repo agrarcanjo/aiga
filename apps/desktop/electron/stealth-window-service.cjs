@@ -18,6 +18,7 @@ function createStealthWindowService(dependencies) {
 
   let isStealthEnabled = false;
   let currentHardening = "safe";
+  let currentOpacity = process.platform === "win32" ? 0.22 : 0.3;
 
   /**
    * Restaura o perfil padrão para operação normal.
@@ -42,7 +43,8 @@ function createStealthWindowService(dependencies) {
   /**
    * Aplica perfil stealth conforme nível de hardening.
    */
-  function applyStealthProfile(windowRef, hardening) {
+  function applyStealthProfile(windowRef, hardening, opacity) {
+    const effectiveOpacity = typeof opacity === "number" ? opacity : currentOpacity;
     if (hardening === "off") {
       applyNormalProfile(windowRef);
       return;
@@ -52,7 +54,7 @@ function createStealthWindowService(dependencies) {
       windowRef.setContentProtection(true);
       windowRef.setSkipTaskbar(true);
       windowRef.setAlwaysOnTop(true, "floating");
-      windowRef.setOpacity(process.platform === "win32" ? 0.22 : 0.3);
+      windowRef.setOpacity(effectiveOpacity);
       windowRef.setIgnoreMouseEvents(false);
       windowRef.flashFrame(false);
       windowRef.setProgressBar(-1);
@@ -65,7 +67,7 @@ function createStealthWindowService(dependencies) {
     windowRef.setContentProtection(true);
     windowRef.setSkipTaskbar(true);
     windowRef.setAlwaysOnTop(true, "screen-saver");
-    windowRef.setOpacity(process.platform === "win32" ? 0.08 : 0.12);
+    windowRef.setOpacity(effectiveOpacity);
     windowRef.setIgnoreMouseEvents(true, { forward: true });
     windowRef.flashFrame(false);
     windowRef.setProgressBar(-1);
@@ -100,7 +102,10 @@ function createStealthWindowService(dependencies) {
 
     try {
       if (enabled) {
-        applyStealthProfile(windowRef, hardening);
+        if (typeof options?.opacity === "number") {
+          currentOpacity = options.opacity;
+        }
+        applyStealthProfile(windowRef, hardening, currentOpacity);
       } else {
         applyNormalProfile(windowRef);
       }
@@ -149,7 +154,8 @@ function createStealthWindowService(dependencies) {
   function getState() {
     return {
       enabled: isStealthEnabled,
-      hardening: currentHardening
+      hardening: currentHardening,
+      opacity: currentOpacity
     };
   }
 

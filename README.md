@@ -1,4 +1,4 @@
-# Clone Perssua
+# AI Personal Agent
 
 Bootstrap inicial do monorepo para o MVP desktop.
 

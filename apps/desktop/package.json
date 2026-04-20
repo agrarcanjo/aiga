@@ -1,11 +1,11 @@
 {
-  "name": "@clone-perssua/desktop",
+  "name": "@aiga/desktop",
   "private": true,
   "version": "0.1.0",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "dev": "concurrently --kill-others --success first \"vite\" \"wait-on tcp:5173 && electron .\"",
     "build": "vite build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -16,8 +16,8 @@
   },
   "build": {
     "appId": "com.cloneperssua.desktop",
-    "productName": "Clone Perssua",
-    "copyright": "Copyright © 2025 Clone Perssua",
+    "productName": "AIGA",
+    "copyright": "Copyright © 2025 AIGA",
     "directories": {
       "output": "release/${version}",
       "buildResources": "build"
@@ -58,7 +58,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Clone Perssua",
+      "shortcutName": "AIGA",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",
