@@ -15,10 +15,16 @@ function createShortcutService(options) {
 
   async function handleCaptureShortcut() {
     try {
-      await screenshotService.captureScreenshot({
+      const item = await screenshotService.captureScreenshot({
         source: "full",
         trigger: "shortcut"
       });
+      if (typeof emitRendererEvent === "function") {
+        emitRendererEvent("screenshot:quick-analyze", {
+          captureId: item.captureId,
+          previewDataUrl: item.previewDataUrl
+        });
+      }
     } catch (error) {
       logger.error("Global capture shortcut failed", {
         message: error instanceof Error ? error.message : "Unknown error"

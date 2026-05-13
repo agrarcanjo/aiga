@@ -10,15 +10,7 @@ import type {
 
 // ─── Constantes ─────────────────────────────────────────────────────────────
 
-const DEFAULT_SCREENSHOT_PROMPT = `Analise cuidadosamente tudo o que está visível nesta tela e responda de forma extremamente objetiva e direta.
-
-REGRAS DE RESPOSTA:
-- Se for uma questão de múltipla escolha: responda apenas a letra correta e uma justificativa em 1 linha.
-- Se for um problema de código/algoritmo (LeetCode, HackerRank etc.): forneça a solução em código com complexidade otimizada e explique em 1-2 linhas.
-- Se for uma pergunta discursiva: responda em no máximo 3 linhas, indo direto ao ponto.
-- Se for um formulário, interface ou tela qualquer: descreva o que vê e sugira a ação mais útil.
-- Nunca enrole. Seja cirúrgico. O usuário precisa da resposta agora.
-- Responda sempre no idioma da questão apresentada na tela.`;
+const DEFAULT_SCREENSHOT_PROMPT = "analise a tela";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -33,6 +25,8 @@ interface ChatMessage {
   actionableMessage?: string;
   retryable?: boolean;
   linkedScreenshotIds: string[];
+  linkedScreenshotPreviewUrls: string[];
+  linkedAudioDuration?: number;
 }
 
 type SettingsTab = "microphone" | "api" | "resources" | "shortcuts" | "logs";
@@ -130,9 +124,9 @@ export function App(): JSX.Element {
   const [quickAnalysis, setQuickAnalysis] = useState(true);
 
   // ── Stealth + LLM + opacity ─────────────────────────────────────────────
-  const [stealthEnabled, setStealthEnabled] = useState(false);
+  const [stealthEnabled, setStealthEnabled] = useState(true);
   const [hasLlm, setHasLlm] = useState(false);
-  const [opacity, setOpacity] = useState(1);
+  const [opacity, setOpacity] = useState(0.8);
   const [opacityOpen, setOpacityOpen] = useState(false);
 
   // ── Settings modal ──────────────────────────────────────────────────────
@@ -162,10 +156,16 @@ export function App(): JSX.Element {
   const [recentLogs, setRecentLogs] = useState<string[]>([]);
   const [logLevel, setLogLevel] = useState<LogLevel>("info");
 
-  // ── Audio recording ──────────────────────────────────────────────────────
+  // ── Audio recording ────────────────────────────────────────────────────────────────────────
+  const [audioReady, setAudioReady] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [pendingAudioId, setPendingAudioId] = useState<string | null>(null);
+  const [pendingAudioDuration, setPendingAudioDuration] = useState(0);
   const activeStreamRef = useRef<MediaStream | null>(null);
   const activeRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingStartRef = useRef(0);
 
   // ── Init ────────────────────────────────────────────────────────────────
 
@@ -179,11 +179,24 @@ export function App(): JSX.Element {
     });
     const unsubChat = window.desktopApi.onChatStreamEvent(handleChatStreamEvent);
     const unsubStealth = window.desktopApi.onStealthStateChanged(handleStealthStateChanged);
+    const unsubQuick = window.desktopApi.onQuickAnalyze((p) => {
+      void submitAsk(DEFAULT_SCREENSHOT_PROMPT, [p.captureId], [p.previewDataUrl]);
+    });
+
+    // Probe de dispositivos de audio sem solicitar permissao
+    void globalThis.navigator.mediaDevices.enumerateDevices()
+      .then((devices) => {
+        if (devices.some((d) => d.kind === "audioinput")) {
+          setAudioReady(true);
+        }
+      })
+      .catch(() => {});
 
     return () => {
       unsubQ();
       unsubChat();
       unsubStealth();
+      unsubQuick();
       stopRecording();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -303,6 +316,7 @@ export function App(): JSX.Element {
             actionableMessage: payload.actionableMessage,
             retryable: payload.retryable,
             linkedScreenshotIds: [],
+            linkedScreenshotPreviewUrls: [],
           },
         ];
       }
@@ -338,7 +352,7 @@ export function App(): JSX.Element {
         [r, ...q.filter((x) => x.captureId !== r.captureId)].slice(0, 10)
       );
       if (quickAnalysis) {
-        await submitAsk(DEFAULT_SCREENSHOT_PROMPT, [r.captureId]);
+        await submitAsk(DEFAULT_SCREENSHOT_PROMPT, [r.captureId], [r.previewDataUrl]);
       } else {
         setPendingScreenshotIds((ids) => [...ids, r.captureId]);
         setAskText(DEFAULT_SCREENSHOT_PROMPT);
@@ -350,55 +364,123 @@ export function App(): JSX.Element {
     setPendingScreenshotIds((ids) => ids.filter((id) => id !== captureId));
   }
 
-  // ── Audio recording ──────────────────────────────────────────────────────
+  // ── Audio recording ────────────────────────────────────────────────────────────────────────
+
+  function getSupportedAudioMimeType(): string {
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/ogg;codecs=opus",
+      "audio/ogg",
+    ];
+    return candidates.find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
+  }
+
+  function formatAudioDuration(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
 
   async function toggleRecording(): Promise<void> {
     if (isRecording) {
       stopRecording();
       return;
     }
+
+    if (!audioReady) {
+      setSettingsTab("microphone");
+      setSettingsOpen(true);
+      return;
+    }
+
     try {
-      const constraint: MediaTrackConstraints | boolean = selectedDeviceId
-        ? { deviceId: { exact: selectedDeviceId } }
-        : true;
-      const stream = await globalThis.navigator.mediaDevices.getUserMedia({ audio: constraint });
+      const audioConstraint: MediaTrackConstraints = {
+        channelCount: 1,
+        sampleRate: 16000,
+        echoCancellation: true,
+        noiseSuppression: true,
+        ...(selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : {}),
+      };
+      const stream = await globalThis.navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
       activeStreamRef.current = stream;
-      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+
+      const mimeType = getSupportedAudioMimeType();
+      const recorderOptions: MediaRecorderOptions = { audioBitsPerSecond: 16000 };
+      if (mimeType) recorderOptions.mimeType = mimeType;
+
+      const recorder = new MediaRecorder(stream, recorderOptions);
       activeRecorderRef.current = recorder;
       const chunks: BlobPart[] = [];
+      const prevPendingId = pendingAudioId;
+
       recorder.ondataavailable = (e) => {
         if (e.data?.size > 0) chunks.push(e.data);
       };
+
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         activeStreamRef.current = null;
-        if (!chunks.length) return;
-        const blob = new Blob(chunks, { type: "audio/webm" });
-        const buf = await blob.arrayBuffer();
-        const bytes = new Uint8Array(buf);
-        let bin = "";
-        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-        const b64 = globalThis.btoa(bin);
-        try {
-          const t = await window.desktopApi.transcribeAudioChunk({ sessionId, chunkBase64: b64 });
-          if (t.text.trim()) {
-            setAskText((prev) => (prev ? `${prev} ${t.text}` : t.text));
-          }
-        } catch { /* silent */ }
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        const duration = (Date.now() - recordingStartRef.current) / 1000;
         setIsRecording(false);
+        setRecordingSeconds(0);
         activeRecorderRef.current = null;
+
+        if (!chunks.length) return;
+
+        const effectiveMime = mimeType || "audio/webm";
+        const blob = new Blob(chunks, { type: effectiveMime });
+
+        const b64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const result = reader.result as string;
+            resolve(result.split(",")[1] ?? "");
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+
+        try {
+          const added = await window.desktopApi.addAudio({
+            audioBase64: b64,
+            mimeType: effectiveMime,
+            durationSeconds: duration,
+          });
+          if (prevPendingId) {
+            void window.desktopApi.removeAudio({ audioId: prevPendingId });
+          }
+          setPendingAudioId(added.audioId);
+          setPendingAudioDuration(duration);
+        } catch { /* silent */ }
       };
-      recorder.start();
+
+      recordingStartRef.current = Date.now();
+      recorder.start(1000);
       setIsRecording(true);
-      globalThis.setTimeout(() => {
-        if (recorder.state !== "inactive") recorder.stop();
-      }, 8000);
+      setRecordingSeconds(0);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1);
+      }, 1000);
     } catch {
       setIsRecording(false);
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
     }
   }
 
   function stopRecording(): void {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
     if (activeRecorderRef.current && activeRecorderRef.current.state !== "inactive") {
       activeRecorderRef.current.stop();
     }
@@ -407,31 +489,49 @@ export function App(): JSX.Element {
       activeStreamRef.current = null;
     }
     setIsRecording(false);
+    setRecordingSeconds(0);
+  }
+
+  function removePendingAudio(): void {
+    if (pendingAudioId) {
+      void window.desktopApi.removeAudio({ audioId: pendingAudioId });
+      setPendingAudioId(null);
+      setPendingAudioDuration(0);
+    }
   }
 
   // ── Submit ASK ────────────────────────────────────────────────────────────
 
-  async function submitAsk(text: string, screenshotIds: string[]): Promise<void> {
+  async function submitAsk(
+    text: string,
+    screenshotIds: string[],
+    previewUrls?: string[],
+    audioIds?: string[]
+  ): Promise<void> {
     const ask = text.trim();
-    if (!ask) return;
+    if (!ask && !audioIds?.length) return;
+    const effectiveAsk = ask || "analise o audio";
     setIsSubmitting(true);
     const tempId = globalThis.crypto.randomUUID();
     const userMsg: ChatMessage = {
       id: tempId,
       requestId: "",
       role: "user",
-      content: ask,
+      content: effectiveAsk,
       createdAtIso: new Date().toISOString(),
       status: "completed",
       linkedScreenshotIds: [...screenshotIds],
+      linkedScreenshotPreviewUrls: previewUrls ?? [],
+      linkedAudioDuration: audioIds?.length ? pendingAudioDuration : undefined,
     };
     setChatMessages((m) => [...m, userMsg]);
     try {
       const r = await window.desktopApi.submitAsk({
         sessionId,
-        ask,
+        ask: effectiveAsk,
         screenshotIds: screenshotIds.length > 0 ? screenshotIds : undefined,
-        presetId: "ui-analysis",
+        audioIds: audioIds?.length ? audioIds : undefined,
+        presetId: undefined,
       });
       // Patch requestId on the user message
       setChatMessages((m) =>
@@ -439,6 +539,13 @@ export function App(): JSX.Element {
       );
       setPendingScreenshotIds([]);
       setAskText("");
+      if (audioIds?.length) {
+        for (const id of audioIds) {
+          void window.desktopApi.removeAudio({ audioId: id });
+        }
+        setPendingAudioId(null);
+        setPendingAudioDuration(0);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erro ao enviar.";
       setChatMessages((m) => [
@@ -452,6 +559,7 @@ export function App(): JSX.Element {
           status: "error",
           actionableMessage: msg,
           linkedScreenshotIds: [],
+          linkedScreenshotPreviewUrls: [],
         },
       ]);
       setIsSubmitting(false);
@@ -459,7 +567,11 @@ export function App(): JSX.Element {
   }
 
   async function handleSendAsk(): Promise<void> {
-    await submitAsk(askText, pendingScreenshotIds);
+    const previewUrls = pendingScreenshotIds.map(
+      (id) => screenshotQueue.find((x) => x.captureId === id)?.previewDataUrl ?? ""
+    );
+    const audioIds = pendingAudioId ? [pendingAudioId] : [];
+    await submitAsk(askText, pendingScreenshotIds, previewUrls, audioIds);
   }
 
   function handleAskKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -645,18 +757,37 @@ export function App(): JSX.Element {
             </button>
 
             {/* Microphone */}
-            <button
-              type="button"
-              title={
-                isRecording
-                  ? "Parar gravação"
-                  : `Gravar áudio (${pushToTalkShortcut})`
-              }
-              style={iconBtn(isRecording, isRecording)}
-              onClick={() => void toggleRecording()}
-            >
-              🎙️
-            </button>
+            {!audioReady ? (
+              <button
+                type="button"
+                title="Microfone não configurado — clique para configurar"
+                style={{ ...iconBtn(), opacity: 0.4 }}
+                onClick={() => { setSettingsTab("microphone"); setSettingsOpen(true); }}
+              >
+                🎤️
+              </button>
+            ) : isRecording ? (
+              <button
+                type="button"
+                title="Parar gravação"
+                style={{ ...iconBtn(), display: "flex", alignItems: "center", gap: 3, color: C.error }}
+                onClick={() => stopRecording()}
+              >
+                <span style={{ fontSize: 10 }}>🔴</span>
+                <span style={{ fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                  {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}
+                </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                title={`Gravar áudio (${pushToTalkShortcut})`}
+                style={iconBtn()}
+                onClick={() => void toggleRecording()}
+              >
+                🎤️
+              </button>
+            )}
 
             {/* Translation shortcut */}
             <button
@@ -745,7 +876,8 @@ export function App(): JSX.Element {
             {/* Separator */}
             <span style={{ width: 1, background: C.border, alignSelf: "stretch", margin: "4px 2px" }} />
 
-            {/* Minimize */}
+            {/* Minimize — hidden in stealth mode (window cannot be recovered after minimize) */}
+            {!stealthEnabled && (
             <button
               type="button"
               title="Minimizar"
@@ -754,6 +886,7 @@ export function App(): JSX.Element {
             >
               ─
             </button>
+            )}
 
             {/* Quit */}
             <button
@@ -827,6 +960,34 @@ export function App(): JSX.Element {
                 </span>
               ) : (
                 <>
+                  {msg.role === "user" && msg.linkedAudioDuration != null && (
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 4,
+                      background: "rgba(255,255,255,0.12)", borderRadius: 4,
+                      padding: "3px 8px", marginBottom: 6, fontSize: 11
+                    }}>
+                      <span>🔊</span>
+                      <span>{formatAudioDuration(msg.linkedAudioDuration)} de áudio</span>
+                    </div>
+                  )}
+                  {msg.role === "user" && msg.linkedScreenshotPreviewUrls.length > 0 && (
+                    <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
+                      {msg.linkedScreenshotPreviewUrls.filter(Boolean).map((url, i) => (
+                        <img
+                          key={i}
+                          src={url}
+                          alt="screenshot enviado"
+                          style={{
+                            maxWidth: 120,
+                            maxHeight: 80,
+                            borderRadius: 4,
+                            objectFit: "cover",
+                            border: `1px solid rgba(255,255,255,0.12)`,
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
                   <span style={{ whiteSpace: "pre-wrap", color: C.text }}>
                     {msg.content ||
                       (msg.status === "pending" || msg.status === "streaming"
@@ -848,8 +1009,8 @@ export function App(): JSX.Element {
           <div ref={chatEndRef} />
         </div>
 
-        {/* ── Screenshot thumbnails ─────────────────────────────────── */}
-        {pendingItems.length > 0 && (
+        {/* ── Pending attachments (screenshots + audio) ──────────────────── */}
+        {(pendingItems.length > 0 || !!pendingAudioId) && (
           <div
             style={{
               display: "flex",
@@ -857,6 +1018,7 @@ export function App(): JSX.Element {
               padding: "6px 12px",
               borderTop: `1px solid ${C.border}`,
               flexWrap: "wrap",
+              alignItems: "center",
             }}
           >
             {pendingItems.map((item) => (
@@ -872,13 +1034,13 @@ export function App(): JSX.Element {
                     border: `1px solid ${C.border}`,
                     borderRadius: 4,
                     overflow: "hidden",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 18,
                   }}
                 >
-                  🖼️
+                  <img
+                    src={item.previewDataUrl}
+                    alt="screenshot"
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
                 </div>
                 <button
                   type="button"
@@ -906,6 +1068,56 @@ export function App(): JSX.Element {
                 </button>
               </div>
             ))}
+
+            {/* Audio pendente */}
+            {pendingAudioId && (
+              <div style={{ position: "relative" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    background: C.surface2,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 6,
+                    padding: "4px 10px",
+                    fontSize: 12,
+                    color: C.text,
+                    height: 40,
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>🔊</span>
+                  <span style={{ fontVariantNumeric: "tabular-nums", color: C.textMuted }}>
+                    {formatAudioDuration(pendingAudioDuration)}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Remover áudio"
+                  onClick={() => removePendingAudio()}
+                  style={{
+                    position: "absolute",
+                    top: -6,
+                    right: -6,
+                    background: C.error,
+                    border: "none",
+                    borderRadius: "50%",
+                    color: "#fff",
+                    width: 16,
+                    height: 16,
+                    fontSize: 10,
+                    cursor: "pointer",
+                    padding: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
           </div>
         )}
 

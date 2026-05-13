@@ -17,9 +17,11 @@ const { createLlamaServerManager } = require("./llama-server-manager.cjs");
 const { createWhisperCliManager } = require("./whisper-cli-manager.cjs");
 const { createModelManager } = require("./model-manager.cjs");
 const { createAutoUpdateService } = require("./auto-update-service.cjs");
+const { createAudioQueue } = require("./audio-queue.cjs");
 
 let logger;
 let shortcutService;
+let stealthWindowService;
 let mainWindowRef;
 let llamaServerManager;
 let whisperCliManager;
@@ -55,11 +57,20 @@ function createWindow() {
     }
   });
 
+  // Aplica content protection imediatamente, antes de qualquer frame ser renderizado.
+  // Isso impede que a janela apareça em prints, compartilhamento de tela e gravações.
+  mainWindowRef.setContentProtection(true);
+
   const url = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
   logger.debug("Loading renderer URL", { url });
   mainWindowRef.loadURL(url);
   mainWindowRef.once("ready-to-show", () => {
-    mainWindowRef.show();
+    // Stealth é o modo padrão: usa showInactive para não roubar foco
+    if (stealthWindowService) {
+      stealthWindowService.setStealthMode({ enabled: true, hardening: "safe" });
+    } else {
+      mainWindowRef.show();
+    }
   });
   mainWindowRef.on("closed", () => {
     mainWindowRef = undefined;
@@ -113,7 +124,9 @@ app.whenReady().then(() => {
     settingsStore,
     emitRendererEvent: emitToAllWindows
   });
-  const stealthWindowService = createStealthWindowService({
+  const audioQueue = createAudioQueue({ logger });
+
+  stealthWindowService = createStealthWindowService({
     logger,
     getMainWindow: () => mainWindowRef
   });
@@ -135,6 +148,7 @@ app.whenReady().then(() => {
     logger,
     settingsStore,
     screenshotService,
+    audioQueue,
     shortcutService,
     providerRouter,
     sttAdapter,
@@ -145,6 +159,19 @@ app.whenReady().then(() => {
   });
   shortcutService.refreshShortcuts();
   createWindow();
+
+  // Emite estado stealth inicial para o renderer assim que a janela carregar
+  app.once("browser-window-created", (_e, win) => {
+    win.webContents.once("did-finish-load", () => {
+      emitToAllWindows("stealth:state-changed", {
+        enabled: true,
+        hardening: "safe",
+        opacity: 0.8,
+        source: "ipc",
+        appliedAtIso: new Date().toISOString()
+      });
+    });
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

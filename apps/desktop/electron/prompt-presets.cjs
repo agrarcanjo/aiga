@@ -2,6 +2,17 @@
 
 const PROMPT_PRESETS = [
   {
+    id: "code-solver",
+    title: "Resolver problema de codigo",
+    description: "Fornece solucao otimizada para problemas de algoritmo (LeetCode, HackerRank etc.).",
+    template:
+      "Voce e um assistente tecnico. Analise a imagem e identifique o conteudo principal.\n" +
+      "- Se for um problema de ALGORITMO ou CODIGO (LeetCode, HackerRank, entrevista etc.): escreva APENAS a solucao em codigo completo e funcional (use a linguagem visivel ou Python). Depois, em 1 linha, informe a complexidade (ex: 'O(n) tempo, O(1) espaco'). NAO descreva a tela. NAO mencione login. NAO analise a interface.\n" +
+      "- Se for uma QUESTAO de multipla escolha: responda somente a letra correta e 1 linha de justificativa.\n" +
+      "- Se for uma PERGUNTA DISCURSIVA: responda em no maximo 3 linhas objetivas.\n" +
+      "Responda sempre no idioma da questao. Contexto adicional do usuario (pode estar vazio): {{ASK}}"
+  },
+  {
     id: "ui-analysis",
     title: "Analise de UI",
     description: "Avalia clareza visual, problemas de UX e melhorias objetivas.",
@@ -24,7 +35,7 @@ const PROMPT_PRESETS = [
   }
 ];
 
-const DEFAULT_PRESET_ID = "ui-analysis";
+const DEFAULT_PRESET_ID = "code-solver";
 
 function getPromptPresets() {
   return PROMPT_PRESETS.map((item) => ({

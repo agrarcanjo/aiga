@@ -18,7 +18,18 @@ const chatAskRequestSchema = z.object({
   sessionId: z.string().min(1),
   ask: z.string().min(1).max(10000),
   screenshotIds: z.array(z.string().min(1)).optional(),
+  audioIds: z.array(z.string().min(1)).optional(),
   presetId: z.string().min(1).optional()
+});
+
+const audioAddRequestSchema = z.object({
+  audioBase64: z.string().min(8),
+  mimeType: z.string().min(5).max(60),
+  durationSeconds: z.number().min(0).max(3600)
+});
+
+const audioRemoveRequestSchema = z.object({
+  audioId: z.string().min(1)
 });
 
 const audioTranscribeRequestSchema = z.object({
@@ -164,6 +175,7 @@ function setupIpcHandlers(dependencies) {
   const logger = dependencies?.logger || createNoopLogger();
   const settingsStore = dependencies?.settingsStore;
   const screenshotService = dependencies?.screenshotService;
+  const audioQueue = dependencies?.audioQueue;
   const shortcutService = dependencies?.shortcutService;
   const providerRouter = dependencies?.providerRouter;
   const sttAdapter = dependencies?.sttAdapter;
@@ -218,6 +230,32 @@ function setupIpcHandlers(dependencies) {
     };
   });
 
+  ipcMain.handle("audio:add", async (_event, payload) => {
+    const parsed = audioAddRequestSchema.parse(payload);
+    if (!audioQueue) {
+      throw new Error("Audio queue not available.");
+    }
+    const item = audioQueue.addAudio({
+      audioBase64: parsed.audioBase64,
+      mimeType: parsed.mimeType,
+      durationSeconds: parsed.durationSeconds
+    });
+    logger.info("IPC audio:add", { audioId: item.audioId, durationSeconds: Math.round(item.durationSeconds) });
+    return {
+      audioId: item.audioId,
+      durationSeconds: item.durationSeconds,
+      createdAtIso: item.createdAtIso
+    };
+  });
+
+  ipcMain.handle("audio:remove", async (_event, payload) => {
+    const parsed = audioRemoveRequestSchema.parse(payload);
+    if (audioQueue) {
+      audioQueue.removeAudio(parsed.audioId);
+    }
+    return { ok: true };
+  });
+
   ipcMain.handle("chat:ask", async (_event, payload) => {
     const parsed = chatAskRequestSchema.parse(payload);
     const requestId = randomUUID();
@@ -257,6 +295,11 @@ function setupIpcHandlers(dependencies) {
         ? availableScreenshots.filter((item) => parsed.screenshotIds.includes(item.captureId))
         : [];
 
+      const availableAudios = audioQueue ? audioQueue.getQueue() : [];
+      const selectedAudios = parsed.audioIds?.length
+        ? availableAudios.filter((item) => parsed.audioIds.includes(item.audioId))
+        : [];
+
       const promptBuild = buildPromptWithPreset({
         ask: parsed.ask,
         presetId: parsed.presetId
@@ -282,6 +325,7 @@ function setupIpcHandlers(dependencies) {
           effectiveFlags: resolvedFlags.effective,
           ask: promptBuild.prompt,
           screenshots: selectedScreenshots,
+          audioItems: selectedAudios,
           onEvent: (streamEvent) => emitRendererEvent("chat:stream-event", streamEvent)
         });
       } catch (error) {

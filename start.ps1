@@ -23,11 +23,9 @@ function Write-Fail([string]$msg) {
     Write-Host "   ERRO  $msg" -ForegroundColor Red
 }
 
-Write-Host ""
-Write-Host "  ╔═══════════════════════════════════╗" -ForegroundColor Magenta
-Write-Host "  ║         AIGA  —  dev start         ║" -ForegroundColor Magenta
-Write-Host "  ╚═══════════════════════════════════╝" -ForegroundColor Magenta
-
+Write-Host "  ------------------  "
+Write-Host "  AIGA  —  dev start  "
+Write-Host "  ------------------  "
 # ── 1. Node.js ───────────────────────────────────────────────────────────────
 Write-Step "Verificando Node.js (>= 20.11)..."
 $nodeVersion = node --version 2>&1

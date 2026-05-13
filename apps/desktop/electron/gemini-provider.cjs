@@ -5,14 +5,14 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 /**
  * Constrói a lista de partes multimodais para o prompt Gemini.
  */
-function buildGeminiParts(ask, screenshots) {
+function buildGeminiParts(ask, screenshots, audioItems) {
   const parts = [
     {
       text: ask
     }
   ];
 
-  screenshots.forEach((item) => {
+  (screenshots || []).forEach((item) => {
     if (!fs.existsSync(item.imagePath)) {
       return;
     }
@@ -21,6 +21,19 @@ function buildGeminiParts(ask, screenshots) {
       inlineData: {
         mimeType: "image/png",
         data: fs.readFileSync(item.imagePath).toString("base64")
+      }
+    });
+  });
+
+  (audioItems || []).forEach((item) => {
+    if (!fs.existsSync(item.audioPath)) {
+      return;
+    }
+
+    parts.push({
+      inlineData: {
+        mimeType: item.mimeType || "audio/webm",
+        data: fs.readFileSync(item.audioPath).toString("base64")
       }
     });
   });
@@ -39,12 +52,13 @@ function createGeminiProvider(options) {
   async function streamAskResponse(input) {
     const genAI = new GoogleGenerativeAI(input.apiKey);
     const model = genAI.getGenerativeModel({ model: modelName });
-    const parts = buildGeminiParts(input.ask, input.screenshots);
+    const parts = buildGeminiParts(input.ask, input.screenshots, input.audioItems || []);
 
     logger.info("Starting Gemini streaming request", {
       requestId: input.requestId,
       modelName,
-      screenshotCount: input.screenshots.length
+      screenshotCount: (input.screenshots || []).length,
+      audioCount: (input.audioItems || []).length
     });
 
     input.onEvent({

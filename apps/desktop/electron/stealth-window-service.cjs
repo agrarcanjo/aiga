@@ -18,7 +18,7 @@ function createStealthWindowService(dependencies) {
 
   let isStealthEnabled = false;
   let currentHardening = "safe";
-  let currentOpacity = process.platform === "win32" ? 0.22 : 0.3;
+  let currentOpacity = 0.8;
 
   /**
    * Restaura o perfil padrão para operação normal.

@@ -9,6 +9,7 @@ export const IPC_CHANNELS = {
   screenshotQueueGet: "screenshot:queue:get",
   screenshotQueueClear: "screenshot:queue:clear",
   screenshotQueueUpdated: "screenshot:queue-updated",
+  screenshotQuickAnalyze: "screenshot:quick-analyze",
   stealthStateChanged: "stealth:state-changed",
   chatAsk: "chat:ask",
   chatStreamEvent: "chat:stream-event",
@@ -73,11 +74,33 @@ export interface ScreenshotQueueUpdatedEvent {
   items: ScreenshotQueueItem[];
 }
 
+export interface ScreenshotQuickAnalyzeEvent {
+  captureId: string;
+  previewDataUrl: string;
+}
+
 export interface ChatAskRequest {
   sessionId: string;
   ask: string;
   screenshotIds?: string[];
+  audioIds?: string[];
   presetId?: string;
+}
+
+export interface AudioAddRequest {
+  audioBase64: string;
+  mimeType: string;
+  durationSeconds: number;
+}
+
+export interface AudioAddResponse {
+  audioId: string;
+  durationSeconds: number;
+  createdAtIso: string;
+}
+
+export interface AudioRemoveRequest {
+  audioId: string;
 }
 
 export interface ChatAskResponse {
@@ -368,6 +391,8 @@ export interface DesktopApi {
   getPromptPresets(): Promise<PromptPresetsGetResponse>;
   submitAsk(payload: ChatAskRequest): Promise<ChatAskResponse>;
   onChatStreamEvent(listener: (payload: ChatStreamEvent) => void): () => void;
+  addAudio(payload: AudioAddRequest): Promise<AudioAddResponse>;
+  removeAudio(payload: AudioRemoveRequest): Promise<{ ok: boolean }>;
   transcribeAudioChunk(payload: AudioTranscribeRequest): Promise<AudioTranscribeResponse>;
   setStealthMode(payload: StealthSetModeRequest): Promise<StealthSetModeResponse>;
   getSettings(): Promise<SettingsGetResponse>;
@@ -390,6 +415,7 @@ export interface DesktopApi {
   minimizeWindow(): Promise<void>;
   setWindowOpacity(opacity: number): Promise<{ opacity: number }>;
   onScreenshotQueueUpdated(listener: (payload: ScreenshotQueueUpdatedEvent) => void): () => void;
+  onQuickAnalyze(listener: (payload: ScreenshotQuickAnalyzeEvent) => void): () => void;
   onStealthStateChanged(listener: (payload: StealthStateChangedEvent) => void): () => void;
   onAutoUpdateEvent(listener: (payload: AutoUpdateEvent) => void): () => void;
 }

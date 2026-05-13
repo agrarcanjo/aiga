@@ -2,6 +2,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 const screenshotQueueUpdatedChannel = "screenshot:queue-updated";
+const screenshotQuickAnalyzeChannel = "screenshot:quick-analyze";
 const chatStreamEventChannel = "chat:stream-event";
 const stealthStateChangedChannel = "stealth:state-changed";
 const autoUpdateEventChannel = "auto-update:event";
@@ -16,6 +17,8 @@ contextBridge.exposeInMainWorld("desktopApi", {
   captureScreenshot: (payload) => ipcRenderer.invoke("screenshot:capture", payload),
   getScreenshotQueue: () => ipcRenderer.invoke("screenshot:queue:get"),
   clearScreenshotQueue: () => ipcRenderer.invoke("screenshot:queue:clear"),
+  addAudio: (payload) => ipcRenderer.invoke("audio:add", payload),
+  removeAudio: (payload) => ipcRenderer.invoke("audio:remove", payload),
   getPromptPresets: () => ipcRenderer.invoke("prompt:presets:get"),
   submitAsk: (payload) => ipcRenderer.invoke("chat:ask", payload),
   onChatStreamEvent: (listener) => {
@@ -48,6 +51,13 @@ contextBridge.exposeInMainWorld("desktopApi", {
     ipcRenderer.on(screenshotQueueUpdatedChannel, wrappedListener);
     return () => {
       ipcRenderer.removeListener(screenshotQueueUpdatedChannel, wrappedListener);
+    };
+  },
+  onQuickAnalyze: (listener) => {
+    const wrappedListener = (_event, payload) => listener(payload);
+    ipcRenderer.on(screenshotQuickAnalyzeChannel, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(screenshotQuickAnalyzeChannel, wrappedListener);
     };
   },
   onStealthStateChanged: (listener) => {
