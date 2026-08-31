@@ -5,6 +5,11 @@ const crypto = require("node:crypto");
 const https = require("node:https");
 const http = require("node:http");
 const { app } = require("electron");
+const {
+  DEFAULT_WHISPER_BASE_URL,
+  DEFAULT_WHISPER_SMALL_URL,
+  DEFAULT_WHISPER_MEDIUM_URL
+} = require("./transcription-packs.cjs");
 
 function streamHashSha256(filePath) {
   return new Promise((resolve, reject) => {
@@ -22,15 +27,22 @@ function ensureDirectory(dirPath) {
   }
 }
 
-function downloadToFile(url, destinationPath) {
+function downloadToFile(url, destinationPath, onProgress) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const client = parsed.protocol === "http:" ? http : https;
 
     const request = client.get(parsed, (response) => {
-      if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+      if (
+        response.statusCode &&
+        response.statusCode >= 300 &&
+        response.statusCode < 400 &&
+        response.headers.location
+      ) {
         response.resume();
-        downloadToFile(response.headers.location, destinationPath).then(resolve).catch(reject);
+        downloadToFile(response.headers.location, destinationPath, onProgress)
+          .then(resolve)
+          .catch(reject);
         return;
       }
 
@@ -40,11 +52,36 @@ function downloadToFile(url, destinationPath) {
         return;
       }
 
+      const total = Number(response.headers["content-length"] || 0);
+      let received = 0;
       const output = fs.createWriteStream(destinationPath);
       response.pipe(output);
 
+      response.on("data", (chunk) => {
+        received += chunk.length;
+        if (typeof onProgress === "function") {
+          const percent = total > 0 ? Math.min(99, Math.round((received / total) * 100)) : null;
+          onProgress({
+            receivedBytes: received,
+            totalBytes: total || null,
+            percent,
+            message: total
+              ? `Baixando… ${percent}%`
+              : `Baixando… ${Math.round(received / (1024 * 1024))} MB`
+          });
+        }
+      });
+
       output.on("finish", () => {
         output.close();
+        if (typeof onProgress === "function") {
+          onProgress({
+            receivedBytes: received,
+            totalBytes: total || received,
+            percent: 100,
+            message: "Download concluído"
+          });
+        }
         resolve();
       });
 
@@ -84,8 +121,22 @@ function createModelManager(options) {
       key: "whisper",
       fileName: "ggml-base.bin",
       configuredPath: process.env.WHISPER_MODEL_PATH || "",
-      configuredUrl: process.env.WHISPER_MODEL_URL || "",
+      configuredUrl: process.env.WHISPER_MODEL_URL || DEFAULT_WHISPER_BASE_URL,
       configuredSha256: (process.env.WHISPER_MODEL_SHA256 || "").toLowerCase()
+    },
+    "whisper-small": {
+      key: "whisper-small",
+      fileName: "ggml-small.bin",
+      configuredPath: process.env.WHISPER_SMALL_MODEL_PATH || "",
+      configuredUrl: process.env.WHISPER_SMALL_MODEL_URL || DEFAULT_WHISPER_SMALL_URL,
+      configuredSha256: (process.env.WHISPER_SMALL_MODEL_SHA256 || "").toLowerCase()
+    },
+    "whisper-medium": {
+      key: "whisper-medium",
+      fileName: "ggml-medium.bin",
+      configuredPath: process.env.WHISPER_MEDIUM_MODEL_PATH || "",
+      configuredUrl: process.env.WHISPER_MEDIUM_MODEL_URL || DEFAULT_WHISPER_MEDIUM_URL,
+      configuredSha256: (process.env.WHISPER_MEDIUM_MODEL_SHA256 || "").toLowerCase()
     }
   };
 
@@ -98,6 +149,20 @@ function createModelManager(options) {
       lastError: ""
     },
     whisper: {
+      state: "idle",
+      filePath: "",
+      sha256: "",
+      lastValidatedAtIso: "",
+      lastError: ""
+    },
+    "whisper-small": {
+      state: "idle",
+      filePath: "",
+      sha256: "",
+      lastValidatedAtIso: "",
+      lastError: ""
+    },
+    "whisper-medium": {
       state: "idle",
       filePath: "",
       sha256: "",
@@ -135,11 +200,23 @@ function createModelManager(options) {
     return actual;
   }
 
-  async function ensureModel(modelKey) {
+  async function ensureModel(modelKey, ensureOptions = {}) {
     const descriptor = registry[modelKey];
+    if (!descriptor) {
+      return {
+        state: "error",
+        filePath: "",
+        sha256: "",
+        lastValidatedAtIso: "",
+        lastError: `Modelo desconhecido: ${modelKey}`,
+        model: modelKey
+      };
+    }
+
     const state = modelState[modelKey];
     state.state = "checking";
     state.lastError = "";
+    const onProgress = ensureOptions.onProgress;
 
     try {
       let filePath = resolveConfiguredOrDefaultPath(modelKey);
@@ -174,7 +251,7 @@ function createModelManager(options) {
           url: descriptor.configuredUrl,
           destinationPath
         });
-        await downloadToFile(descriptor.configuredUrl, destinationPath);
+        await downloadToFile(descriptor.configuredUrl, destinationPath, onProgress);
         filePath = destinationPath;
       }
 
@@ -205,17 +282,26 @@ function createModelManager(options) {
 
   async function ensureConfiguredModels() {
     const llama = await ensureModel("llama");
-    const whisper = await ensureModel("whisper");
+    // Whisper: no boot auto-download (UI de pacotes dispara o download).
+    const whisperPath = resolveModelPath("whisper") || resolveModelPath("whisper-small");
+    if (whisperPath) {
+      const key = resolveModelPath("whisper") ? "whisper" : "whisper-small";
+      await ensureModel(key);
+    }
     return {
       llama,
-      whisper
+      whisper: { ...modelState.whisper }
     };
   }
 
   function resolveModelPath(modelKey) {
     const state = modelState[modelKey];
-    if (state.filePath && fs.existsSync(state.filePath)) {
+    if (state?.filePath && fs.existsSync(state.filePath)) {
       return state.filePath;
+    }
+
+    if (!registry[modelKey]) {
+      return "";
     }
 
     const resolved = resolveConfiguredOrDefaultPath(modelKey);
@@ -225,7 +311,9 @@ function createModelManager(options) {
   function getStatus() {
     return {
       llama: { ...modelState.llama },
-      whisper: { ...modelState.whisper }
+      whisper: { ...modelState.whisper },
+      "whisper-small": { ...modelState["whisper-small"] },
+      "whisper-medium": { ...modelState["whisper-medium"] }
     };
   }
 

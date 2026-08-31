@@ -2,16 +2,120 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { app, safeStorage } = require("electron");
+const {
+  DEFAULT_LLM_ROUTING,
+  DEFAULT_TOKEN_BUDGET,
+  DEFAULT_PRIVACY,
+  DEFAULT_LLM_PROVIDERS
+} = require("./llm-defaults.cjs");
+const {
+  DEFAULT_CODE_LANGUAGE,
+  CODE_LANGUAGE_OPTIONS,
+  normalizeCodeLanguage
+} = require("./code-language-options.cjs");
+
+function getDefaultMeetingRecordingsPath() {
+  return path.join(app.getPath("userData"), "meeting-recordings");
+}
+
+function encryptSecret(plain) {
+  if (!plain) {
+    return "";
+  }
+  try {
+    if (safeStorage.isEncryptionAvailable()) {
+      return safeStorage.encryptString(plain).toString("base64");
+    }
+  } catch {
+    return "";
+  }
+  return Buffer.from(plain, "utf-8").toString("base64");
+}
+
+function decryptSecret(encoded) {
+  if (!encoded) {
+    return "";
+  }
+  const encryptedBuffer = Buffer.from(encoded, "base64");
+  try {
+    if (safeStorage.isEncryptionAvailable()) {
+      return safeStorage.decryptString(encryptedBuffer);
+    }
+  } catch {
+    return "";
+  }
+  return encryptedBuffer.toString("utf-8");
+}
+
+const DEFAULT_SETTINGS_AUDIO_CAPTURE = {
+  mode: "system_loopback",
+  deviceId: "default",
+  sampleRate: 16000,
+  channelCount: 1,
+  preRollValidationSeconds: 3,
+  saveRecordings: false,
+  recordingsPath: ""
+};
+
+/**
+ * Normaliza captura de áudio (configs antigas sem deviceId → saída padrão do sistema).
+ */
+function normalizeAudioCapture(partial) {
+  const merged = {
+    ...DEFAULT_SETTINGS_AUDIO_CAPTURE,
+    ...(partial || {})
+  };
+  if (merged.mode === "output_device" && !merged.deviceId) {
+    merged.mode = "system_loopback";
+    merged.deviceId = "default";
+  }
+  if (
+    (merged.mode === "system_loopback" || merged.mode === "output_device") &&
+    !merged.deviceId
+  ) {
+    merged.deviceId = "default";
+  }
+  return merged;
+}
 
 const DEFAULT_SETTINGS = {
   language: "pt-BR",
+  defaultCodeLanguage: DEFAULT_CODE_LANGUAGE,
+  nonStealthModeEnabled: false,
   selectedAudioInputDeviceId: "",
+  selectedAudioInputDeviceLabel: "",
   shortcuts: {
     captureScreen: "Ctrl+E",
     pushToTalk: "Ctrl+D",
-    toggleStealth: "Ctrl+B"
+    toggleFullStealth: "Ctrl+Shift+H"
   },
   geminiApiKeyEncrypted: "",
+  llmProviders: { ...DEFAULT_LLM_PROVIDERS },
+  llmRouting: { ...DEFAULT_LLM_ROUTING },
+  tokenBudget: { ...DEFAULT_TOKEN_BUDGET },
+  privacy: { ...DEFAULT_PRIVACY },
+  audioCapture: { ...DEFAULT_SETTINGS_AUDIO_CAPTURE },
+  screenCapture: {
+    mode: "primary",
+    displayId: ""
+  },
+  transcriptionPacks: {
+    installedLanguageIds: [],
+    preferredModelTier: "base"
+  },
+  meetingPrefs: {
+    defaultMode: "passive",
+    userAliases: [],
+    questionOnlyMode: false
+  },
+  translationPrefs: {
+    sourceLanguage: "auto",
+    targetLanguage: "pt",
+    overlayFontSize: 14,
+    overlayOpacity: 0.92,
+    historyLines: 8,
+    overlayEnabled: true
+  },
   autoUpdate: {
     enabled: false,
     feedUrl: "",
@@ -73,11 +177,71 @@ function createSettingsStore() {
         featureFlags: {
           ...DEFAULT_SETTINGS.featureFlags,
           ...(parsed.featureFlags || {})
+        },
+        llmProviders: {
+          ...DEFAULT_SETTINGS.llmProviders,
+          ...(parsed.llmProviders || {}),
+          gemini: {
+            ...DEFAULT_SETTINGS.llmProviders.gemini,
+            ...(parsed.llmProviders?.gemini || {})
+          },
+          openai: {
+            ...DEFAULT_SETTINGS.llmProviders.openai,
+            ...(parsed.llmProviders?.openai || {})
+          },
+          anthropic: {
+            ...DEFAULT_SETTINGS.llmProviders.anthropic,
+            ...(parsed.llmProviders?.anthropic || {})
+          }
+        },
+        llmRouting: {
+          ...DEFAULT_SETTINGS.llmRouting,
+          ...(parsed.llmRouting || {})
+        },
+        tokenBudget: {
+          ...DEFAULT_SETTINGS.tokenBudget,
+          ...(parsed.tokenBudget || {})
+        },
+        privacy: {
+          ...DEFAULT_SETTINGS.privacy,
+          ...(parsed.privacy || {})
+        },
+        audioCapture: {
+          ...DEFAULT_SETTINGS.audioCapture,
+          ...(parsed.audioCapture || {})
+        },
+        screenCapture: {
+          ...DEFAULT_SETTINGS.screenCapture,
+          ...(parsed.screenCapture || {})
+        },
+        transcriptionPacks: {
+          ...DEFAULT_SETTINGS.transcriptionPacks,
+          ...(parsed.transcriptionPacks || {}),
+          installedLanguageIds: Array.isArray(parsed.transcriptionPacks?.installedLanguageIds)
+            ? parsed.transcriptionPacks.installedLanguageIds
+            : DEFAULT_SETTINGS.transcriptionPacks.installedLanguageIds
+        },
+        meetingPrefs: {
+          ...DEFAULT_SETTINGS.meetingPrefs,
+          ...(parsed.meetingPrefs || {})
+        },
+        translationPrefs: {
+          ...DEFAULT_SETTINGS.translationPrefs,
+          ...(parsed.translationPrefs || {})
         }
       };
     } catch {
       return { ...DEFAULT_SETTINGS };
     }
+  }
+
+  function migrateLegacyGeminiKey(raw) {
+    if (raw.geminiApiKeyEncrypted && !raw.llmProviders?.gemini?.apiKeyEncrypted) {
+      raw.llmProviders = raw.llmProviders || { ...DEFAULT_LLM_PROVIDERS };
+      raw.llmProviders.gemini = raw.llmProviders.gemini || { ...DEFAULT_LLM_PROVIDERS.gemini };
+      raw.llmProviders.gemini.apiKeyEncrypted = raw.geminiApiKeyEncrypted;
+    }
+    return raw;
   }
 
   /**
@@ -92,13 +256,184 @@ function createSettingsStore() {
    * Retorna visão segura das configurações para o renderer sem expor segredo em claro.
    */
   function getPublicSettings() {
-    const raw = readRaw();
+    const raw = migrateLegacyGeminiKey(readRaw());
+    const audioCapture = normalizeAudioCapture(raw.audioCapture);
+    if (
+      raw.audioCapture?.mode !== audioCapture.mode ||
+      (raw.audioCapture?.deviceId || "") !== (audioCapture.deviceId || "") ||
+      ((audioCapture.mode === "system_loopback" || audioCapture.mode === "output_device") &&
+        !raw.audioCapture?.deviceId)
+    ) {
+      writeRaw({
+        ...raw,
+        audioCapture: {
+          ...(raw.audioCapture || {}),
+          ...audioCapture
+        }
+      });
+    }
     return {
       language: raw.language,
+      defaultCodeLanguage: normalizeCodeLanguage(raw.defaultCodeLanguage),
+      nonStealthModeEnabled: Boolean(raw.nonStealthModeEnabled),
       selectedAudioInputDeviceId: raw.selectedAudioInputDeviceId || undefined,
-      shortcuts: raw.shortcuts,
-      hasGeminiApiKey: Boolean(raw.geminiApiKeyEncrypted)
+      selectedAudioInputDeviceLabel: raw.selectedAudioInputDeviceLabel || undefined,
+      shortcuts: {
+        captureScreen: raw.shortcuts?.captureScreen || DEFAULT_SETTINGS.shortcuts.captureScreen,
+        pushToTalk: raw.shortcuts?.pushToTalk || DEFAULT_SETTINGS.shortcuts.pushToTalk,
+        toggleFullStealth:
+          raw.shortcuts?.toggleFullStealth || DEFAULT_SETTINGS.shortcuts.toggleFullStealth
+      },
+      hasGeminiApiKey: Boolean(
+        raw.geminiApiKeyEncrypted || raw.llmProviders?.gemini?.apiKeyEncrypted
+      ),
+      llm: getPublicLlmSettingsFromRaw(raw),
+      audioCapture: {
+        ...audioCapture,
+        recordingsPath:
+          (raw.audioCapture && raw.audioCapture.recordingsPath) ||
+          getDefaultMeetingRecordingsPath(),
+        defaultRecordingsPath: getDefaultMeetingRecordingsPath()
+      },
+      screenCapture: {
+        ...DEFAULT_SETTINGS.screenCapture,
+        ...(raw.screenCapture || {})
+      },
+      transcriptionPacks: {
+        ...DEFAULT_SETTINGS.transcriptionPacks,
+        ...(raw.transcriptionPacks || {}),
+        installedLanguageIds: Array.isArray(raw.transcriptionPacks?.installedLanguageIds)
+          ? raw.transcriptionPacks.installedLanguageIds
+          : DEFAULT_SETTINGS.transcriptionPacks.installedLanguageIds
+      },
+      meetingPrefs: {
+        ...DEFAULT_SETTINGS.meetingPrefs,
+        ...(raw.meetingPrefs || {})
+      },
+      translationPrefs: {
+        ...DEFAULT_SETTINGS.translationPrefs,
+        ...(raw.translationPrefs || {})
+      }
     };
+  }
+
+  function getMeetingPrefs() {
+    const raw = readRaw();
+    return {
+      ...DEFAULT_SETTINGS.meetingPrefs,
+      ...(raw.meetingPrefs || {})
+    };
+  }
+
+  function getTranslationPrefs() {
+    const raw = readRaw();
+    return {
+      ...DEFAULT_SETTINGS.translationPrefs,
+      ...(raw.translationPrefs || {})
+    };
+  }
+
+  function getAudioCapture() {
+    const raw = readRaw();
+    const merged = normalizeAudioCapture(raw.audioCapture);
+    const rawMode = raw.audioCapture?.mode;
+    const rawDeviceId = raw.audioCapture?.deviceId;
+    if (
+      rawMode !== merged.mode ||
+      (rawDeviceId || "") !== (merged.deviceId || "") ||
+      ((merged.mode === "system_loopback" || merged.mode === "output_device") &&
+        !rawDeviceId)
+    ) {
+      writeRaw({
+        ...raw,
+        audioCapture: {
+          ...(raw.audioCapture || {}),
+          ...merged
+        }
+      });
+    }
+    return merged;
+  }
+
+  function getScreenCapture() {
+    const raw = readRaw();
+    return {
+      ...DEFAULT_SETTINGS.screenCapture,
+      ...(raw.screenCapture || {})
+    };
+  }
+
+  function getTranscriptionPacks() {
+    const raw = readRaw();
+    const tier = raw.transcriptionPacks?.preferredModelTier;
+    return {
+      ...DEFAULT_SETTINGS.transcriptionPacks,
+      ...(raw.transcriptionPacks || {}),
+      installedLanguageIds: Array.isArray(raw.transcriptionPacks?.installedLanguageIds)
+        ? raw.transcriptionPacks.installedLanguageIds.map(String)
+        : [...DEFAULT_SETTINGS.transcriptionPacks.installedLanguageIds],
+      preferredModelTier:
+        tier === "medium" || tier === "small" || tier === "base" ? tier : "base"
+    };
+  }
+
+  function getPublicLlmSettingsFromRaw(raw) {
+    const migrated = migrateLegacyGeminiKey(raw);
+    return {
+      providers: {
+        gemini: {
+          enabled: migrated.llmProviders.gemini.enabled,
+          defaultModelId: migrated.llmProviders.gemini.defaultModelId,
+          hasApiKey: Boolean(migrated.llmProviders.gemini.apiKeyEncrypted)
+        },
+        openai: {
+          enabled: migrated.llmProviders.openai.enabled,
+          defaultModelId: migrated.llmProviders.openai.defaultModelId,
+          hasApiKey: Boolean(migrated.llmProviders.openai.apiKeyEncrypted)
+        },
+        anthropic: {
+          enabled: migrated.llmProviders.anthropic.enabled,
+          defaultModelId: migrated.llmProviders.anthropic.defaultModelId,
+          hasApiKey: Boolean(migrated.llmProviders.anthropic.apiKeyEncrypted)
+        }
+      },
+      routing: { ...migrated.llmRouting },
+      tokenBudget: { ...migrated.tokenBudget },
+      privacy: { ...migrated.privacy }
+    };
+  }
+
+  function getPublicLlmSettings() {
+    return getPublicLlmSettingsFromRaw(readRaw());
+  }
+
+  function getLlmRouting() {
+    const raw = migrateLegacyGeminiKey(readRaw());
+    return { ...DEFAULT_LLM_ROUTING, ...raw.llmRouting };
+  }
+
+  function getTokenBudget() {
+    const raw = readRaw();
+    return { ...DEFAULT_TOKEN_BUDGET, ...raw.tokenBudget };
+  }
+
+  function getPrivacySettings() {
+    const raw = readRaw();
+    return { ...DEFAULT_PRIVACY, ...raw.privacy };
+  }
+
+  function resolveAllowCloudForMeetings(featureFlags) {
+    const privacy = getPrivacySettings();
+    if (featureFlags?.forceLocalOnly) {
+      return false;
+    }
+    if (featureFlags?.providerMode === "local") {
+      return false;
+    }
+    if (featureFlags?.providerMode === "cloud") {
+      return privacy.allowCloudProcessingForMeetings !== false;
+    }
+    return privacy.allowCloudProcessingForMeetings;
   }
 
   /**
@@ -106,22 +441,15 @@ function createSettingsStore() {
    * Seguranca: o segredo nunca e exposto ao renderer.
    */
   function getGeminiApiKey() {
-    const raw = readRaw();
-    if (!raw.geminiApiKeyEncrypted) {
-      return "";
-    }
+    return getProviderApiKey("gemini");
+  }
 
-    const encryptedBuffer = Buffer.from(raw.geminiApiKeyEncrypted, "base64");
-
-    try {
-      if (safeStorage.isEncryptionAvailable()) {
-        return safeStorage.decryptString(encryptedBuffer);
-      }
-    } catch {
-      return "";
-    }
-
-    return encryptedBuffer.toString("utf-8");
+  function getProviderApiKey(providerId) {
+    const raw = migrateLegacyGeminiKey(readRaw());
+    const enc =
+      raw.llmProviders?.[providerId]?.apiKeyEncrypted ||
+      (providerId === "gemini" ? raw.geminiApiKeyEncrypted : "");
+    return decryptSecret(enc);
   }
 
   /**
@@ -146,15 +474,120 @@ function createSettingsStore() {
     if (Object.prototype.hasOwnProperty.call(partial, "geminiApiKey")) {
       if (!partial.geminiApiKey) {
         next.geminiApiKeyEncrypted = "";
-      } else if (safeStorage.isEncryptionAvailable()) {
-        next.geminiApiKeyEncrypted = safeStorage.encryptString(partial.geminiApiKey).toString("base64");
+        next.llmProviders = next.llmProviders || { ...DEFAULT_LLM_PROVIDERS };
+        next.llmProviders.gemini = { ...next.llmProviders.gemini, apiKeyEncrypted: "" };
       } else {
-        next.geminiApiKeyEncrypted = Buffer.from(partial.geminiApiKey, "utf-8").toString("base64");
+        const enc = encryptSecret(partial.geminiApiKey);
+        next.geminiApiKeyEncrypted = enc;
+        next.llmProviders = next.llmProviders || { ...DEFAULT_LLM_PROVIDERS };
+        next.llmProviders.gemini = { ...next.llmProviders.gemini, apiKeyEncrypted: enc };
+      }
+    }
+
+    if (partial.audioCapture) {
+      next.audioCapture = {
+        ...DEFAULT_SETTINGS.audioCapture,
+        ...(current.audioCapture || {}),
+        ...partial.audioCapture
+      };
+    }
+
+    if (partial.screenCapture) {
+      next.screenCapture = {
+        ...DEFAULT_SETTINGS.screenCapture,
+        ...(current.screenCapture || {}),
+        ...partial.screenCapture
+      };
+    }
+
+    if (partial.transcriptionPacks) {
+      next.transcriptionPacks = {
+        ...DEFAULT_SETTINGS.transcriptionPacks,
+        ...(current.transcriptionPacks || {}),
+        ...partial.transcriptionPacks,
+        installedLanguageIds: Array.isArray(partial.transcriptionPacks.installedLanguageIds)
+          ? [...new Set(partial.transcriptionPacks.installedLanguageIds.map(String))]
+          : current.transcriptionPacks?.installedLanguageIds ||
+            DEFAULT_SETTINGS.transcriptionPacks.installedLanguageIds
+      };
+    }
+
+    if (partial.meetingPrefs) {
+      next.meetingPrefs = {
+        ...DEFAULT_SETTINGS.meetingPrefs,
+        ...(current.meetingPrefs || {}),
+        ...partial.meetingPrefs
+      };
+      if (Array.isArray(partial.meetingPrefs.userAliases)) {
+        next.meetingPrefs.userAliases = partial.meetingPrefs.userAliases
+          .map((a) => String(a).trim())
+          .filter(Boolean);
+      }
+    }
+
+    if (partial.translationPrefs) {
+      next.translationPrefs = {
+        ...DEFAULT_SETTINGS.translationPrefs,
+        ...(current.translationPrefs || {}),
+        ...partial.translationPrefs
+      };
+    }
+
+    if (partial.llm) {
+      next.llmProviders = {
+        gemini: { ...DEFAULT_LLM_PROVIDERS.gemini, ...(next.llmProviders?.gemini || {}) },
+        openai: { ...DEFAULT_LLM_PROVIDERS.openai, ...(next.llmProviders?.openai || {}) },
+        anthropic: { ...DEFAULT_LLM_PROVIDERS.anthropic, ...(next.llmProviders?.anthropic || {}) }
+      };
+
+      ["gemini", "openai", "anthropic"].forEach((pid) => {
+        const p = partial.llm.providers?.[pid];
+        if (!p) {
+          return;
+        }
+        if (Object.prototype.hasOwnProperty.call(p, "enabled")) {
+          next.llmProviders[pid].enabled = p.enabled;
+        }
+        if (p.defaultModelId) {
+          next.llmProviders[pid].defaultModelId = p.defaultModelId;
+        }
+        if (Object.prototype.hasOwnProperty.call(p, "apiKey")) {
+          next.llmProviders[pid].apiKeyEncrypted = p.apiKey ? encryptSecret(p.apiKey) : "";
+          if (pid === "gemini") {
+            next.geminiApiKeyEncrypted = next.llmProviders[pid].apiKeyEncrypted;
+          }
+        }
+      });
+
+      if (partial.llm.routing) {
+        next.llmRouting = {
+          ...DEFAULT_LLM_ROUTING,
+          ...next.llmRouting,
+          ...partial.llm.routing
+        };
+      }
+      if (partial.llm.tokenBudget) {
+        next.tokenBudget = { ...DEFAULT_TOKEN_BUDGET, ...next.tokenBudget, ...partial.llm.tokenBudget };
+      }
+      if (partial.llm.privacy) {
+        next.privacy = { ...DEFAULT_PRIVACY, ...next.privacy, ...partial.llm.privacy };
       }
     }
 
     if (Object.prototype.hasOwnProperty.call(partial, "selectedAudioInputDeviceId")) {
       next.selectedAudioInputDeviceId = partial.selectedAudioInputDeviceId || "";
+    }
+
+    if (Object.prototype.hasOwnProperty.call(partial, "selectedAudioInputDeviceLabel")) {
+      next.selectedAudioInputDeviceLabel = partial.selectedAudioInputDeviceLabel || "";
+    }
+
+    if (Object.prototype.hasOwnProperty.call(partial, "nonStealthModeEnabled")) {
+      next.nonStealthModeEnabled = Boolean(partial.nonStealthModeEnabled);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(partial, "defaultCodeLanguage")) {
+      next.defaultCodeLanguage = normalizeCodeLanguage(partial.defaultCodeLanguage);
     }
 
     delete next.geminiApiKey;
@@ -166,7 +599,13 @@ function createSettingsStore() {
    * Limpa configurações customizadas e restaura defaults.
    */
   function reset() {
-    writeRaw({ ...DEFAULT_SETTINGS });
+    writeRaw({
+      ...DEFAULT_SETTINGS,
+      llmProviders: { ...DEFAULT_LLM_PROVIDERS },
+      llmRouting: { ...DEFAULT_LLM_ROUTING },
+      tokenBudget: { ...DEFAULT_TOKEN_BUDGET },
+      privacy: { ...DEFAULT_PRIVACY }
+    });
     return getPublicSettings();
   }
 
@@ -244,10 +683,38 @@ function createSettingsStore() {
     return getAutoUpdateSettings();
   }
 
+  function saveLlmPartial(llmPartial) {
+    return savePartial({ llm: llmPartial });
+  }
+
+  function getNonStealthModeEnabled() {
+    const raw = readRaw();
+    return Boolean(raw.nonStealthModeEnabled);
+  }
+
+  function getDefaultCodeLanguage() {
+    const raw = readRaw();
+    return normalizeCodeLanguage(raw.defaultCodeLanguage);
+  }
+
   return {
     getPublicSettings,
+    getNonStealthModeEnabled,
+    getDefaultCodeLanguage,
+    getPublicLlmSettings,
     getGeminiApiKey,
+    getProviderApiKey,
+    getLlmRouting,
+    getTokenBudget,
+    getPrivacySettings,
+    getAudioCapture,
+    getScreenCapture,
+    getTranscriptionPacks,
+    getMeetingPrefs,
+    getTranslationPrefs,
+    resolveAllowCloudForMeetings,
     savePartial,
+    saveLlmPartial,
     reset,
     getFeatureFlags,
     saveFeatureFlags,
@@ -258,5 +725,7 @@ function createSettingsStore() {
 }
 
 module.exports = {
-  createSettingsStore
+  createSettingsStore,
+  CODE_LANGUAGE_OPTIONS,
+  DEFAULT_CODE_LANGUAGE
 };

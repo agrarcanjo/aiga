@@ -21,9 +21,11 @@ function loadIpcWithMockedElectron(ipcMainMock) {
   }
 }
 
-function createHarness() {
+function createHarness(options = {}) {
   const handlers = new Map();
   const rendererEvents = [];
+  let meetingRecording = false;
+  let translationActive = false;
 
   const ipcMainMock = {
     handle(channel, handler) {
@@ -32,6 +34,111 @@ function createHarness() {
   };
 
   const { setupIpcHandlers } = loadIpcWithMockedElectron(ipcMainMock);
+
+  const contextStore = {
+    listProfiles: () => [
+      {
+        id: "profile-1",
+        name: "Test User",
+        role: "Dev",
+        team: "AIGA",
+        responsibilities: "",
+        communicationStyle: "",
+        basePrompt: "",
+        createdAtIso: new Date().toISOString(),
+        updatedAtIso: new Date().toISOString()
+      }
+    ],
+    saveProfile: (profile) => [profile],
+    getProfile: (id) =>
+      id === "profile-1"
+        ? {
+            id: "profile-1",
+            name: "Test User",
+            role: "Dev",
+            team: "AIGA",
+            responsibilities: "",
+            communicationStyle: "",
+            basePrompt: "",
+            createdAtIso: new Date().toISOString(),
+            updatedAtIso: new Date().toISOString()
+          }
+        : null,
+    listTeamMemory: () => [],
+    deleteTeamMemoryItem: () => [],
+    updateTeamMemoryItem: () => null,
+    deleteProfile: () => [],
+    duplicateProfile: () => ({}),
+    appendTeamMemory: () => {}
+  };
+
+  const consentAuditStore = {
+    getConsentText: () => ({ version: "test-v1", text: "Test consent" }),
+    listRecent: () => [],
+    recordConsent: () => ({})
+  };
+
+  const retentionPurgeService = {
+    runPurge: async () => ({
+      retentionDays: 7,
+      deletedFiles: 0,
+      errors: 0,
+      ranAtIso: new Date().toISOString()
+    })
+  };
+
+  const meetingOrchestrator = {
+    startSession: async (payload) => {
+      meetingRecording = true;
+      return {
+        sessionId: "meet-1",
+        startedAtIso: new Date().toISOString(),
+        mode: payload.mode
+      };
+    },
+    stopSession: async () => {
+      meetingRecording = false;
+      return { sessionId: "meet-1", status: "completed" };
+    },
+    cancelSession: async () => {
+      meetingRecording = false;
+      return { sessionId: "meet-1", status: "cancelled" };
+    },
+    appendTranscript: async () => ({ ok: true }),
+    dismissActiveAlert: async () => ({ ok: true }),
+    requestMidCallSummary: async () => ({
+      sessionId: "meet-1",
+      summaryMarkdown: "Resumo parcial"
+    }),
+    addBookmark: async () => ({ ok: true, bookmark: { id: "b1" } }),
+    hasActiveRecording: () => meetingRecording
+  };
+
+  const translationSession = {
+    start: async (payload) => {
+      if (!payload?.consentAccepted) {
+        throw new Error("CONSENT_REQUIRED");
+      }
+      translationActive = true;
+      return {
+        sessionId: "trans-1",
+        startedAtIso: new Date().toISOString(),
+        captureMode: "microphone"
+      };
+    },
+    stop: async () => {
+      translationActive = false;
+      return { sessionId: "trans-1", status: "stopped" };
+    },
+    getStatus: () => ({
+      active: translationActive,
+      sessionId: translationActive ? "trans-1" : undefined,
+      avgLatencyMs: 1200,
+      linesEmitted: 2
+    }),
+    ingestMicChunk: async () => ({ ok: true }),
+    isActive: () => translationActive
+  };
 
   const dependencies = {
     logger: {
@@ -47,14 +154,19 @@ function createHarness() {
     settingsStore: {
       getPublicSettings: () => ({
         language: "pt-BR",
+        nonStealthModeEnabled: false,
+        defaultCodeLanguage: "java",
         shortcuts: {
           captureScreen: "Ctrl+E",
           pushToTalk: "Ctrl+D",
-          toggleStealth: "Ctrl+B"
+          toggleFullStealth: "Ctrl+Shift+H"
         },
         hasGeminiApiKey: true
       }),
+      getNonStealthModeEnabled: () => false,
+      getDefaultCodeLanguage: () => "java",
       getGeminiApiKey: () => "api-key",
+      getProviderApiKey: () => "api-key",
       getFeatureFlags: () => ({
         providerMode: "cloud",
         localProviderEnabled: false,
@@ -66,7 +178,7 @@ function createHarness() {
         shortcuts: {
           captureScreen: "Ctrl+E",
           pushToTalk: "Ctrl+D",
-          toggleStealth: "Ctrl+B"
+          toggleFullStealth: "Ctrl+Shift+H"
         },
         hasGeminiApiKey: true
       }),
@@ -75,7 +187,7 @@ function createHarness() {
         shortcuts: {
           captureScreen: "Ctrl+E",
           pushToTalk: "Ctrl+D",
-          toggleStealth: "Ctrl+B"
+          toggleFullStealth: "Ctrl+Shift+H"
         },
         hasGeminiApiKey: false
       }),
@@ -114,7 +226,16 @@ function createHarness() {
       clearQueue: () => []
     },
     shortcutService: {
-      refreshShortcuts: () => ({ captureShortcut: "Ctrl+E", stealthShortcut: "Ctrl+B" })
+      refreshShortcuts: () => ({
+        captureShortcut: "Ctrl+E",
+        fullStealthShortcut: "Ctrl+Shift+H"
+      })
+    },
+    audioQueue: {
+      getQueue: () => []
+    },
+    llmProviderRegistry: options.llmProviderRegistry || {
+      resolveRoute: () => ({ providerId: "gemini", modelId: "gemini-2.5-flash" })
     },
     providerRouter: {
       streamAskResponse: async (input) => {
@@ -173,15 +294,47 @@ function createHarness() {
       }
     },
     stealthWindowService: {
+      getState: () => ({
+        enabled: false,
+        fullStealth: false,
+        hardening: "safe",
+        opacity: 0.8
+      }),
       setStealthMode: ({ enabled }) => ({
         enabled,
+        fullStealth: false,
         hardening: "safe",
+        appliedAtIso: new Date().toISOString()
+      }),
+      toggleFullStealthMode: () => ({
+        enabled: true,
+        fullStealth: true,
+        hardening: "safe",
+        appliedAtIso: new Date().toISOString()
+      }),
+      exitFullStealthIfActive: () => ({
+        changed: false,
+        enabled: false,
+        fullStealth: false,
+        hardening: "safe",
+        opacity: 0.8,
         appliedAtIso: new Date().toISOString()
       })
     },
     emitRendererEvent: (channel, payload) => {
       rendererEvents.push({ channel, payload });
-    }
+    },
+    contextStore,
+    consentAuditStore,
+    retentionPurgeService,
+    meetingOrchestrator,
+    translationSession,
+    audioLoopbackCapture: {
+      isRecording: () => meetingRecording
+    },
+    audioSourceEnumerator: options.audioSourceEnumerator,
+    audioSourceValidator: options.audioSourceValidator,
+    tokenUsageTracker: options.tokenUsageTracker
   };
 
   setupIpcHandlers(dependencies);
@@ -234,6 +387,16 @@ test("E2E IPC stealth: emite evento de estado para renderer", async () => {
   assert.equal(event.payload.enabled, true);
 });
 
+test("E2E IPC stealth: toggle full stealth emite fullStealth no evento", async () => {
+  const harness = createHarness();
+  const response = await harness.invoke("stealth:toggle-full");
+
+  assert.equal(response.fullStealth, true);
+  const event = harness.rendererEvents.find((item) => item.channel === "stealth:state-changed");
+  assert.ok(event);
+  assert.equal(event.payload.fullStealth, true);
+});
+
 test("E2E IPC chat: aceita request e emite stream started/completed", async () => {
   const harness = createHarness();
 
@@ -253,4 +416,169 @@ test("E2E IPC chat: aceita request e emite stream started/completed", async () =
 
   assert.ok(chatEvents.includes("started"));
   assert.ok(chatEvents.includes("completed"));
+});
+
+test("E2E IPC meeting: start, append transcript e cancel", async () => {
+  const harness = createHarness();
+  const started = await harness.invoke("meeting:session:start", {
+    profileId: "profile-1",
+    objective: "Daily",
+    useCloud: false,
+    mode: "hybrid",
+    consentAccepted: true
+  });
+  assert.equal(started.sessionId, "meet-1");
+
+  const appended = await harness.invoke("meeting:transcript:append", {
+    sessionId: "meet-1",
+    text: "Joao, o que voce acha?"
+  });
+  assert.equal(appended.ok, true);
+
+  const cancelled = await harness.invoke("meeting:session:cancel", {
+    sessionId: "meet-1"
+  });
+  assert.equal(cancelled.status, "cancelled");
+});
+
+test("E2E IPC meeting: dismiss alerta ativo", async () => {
+  const harness = createHarness();
+  await harness.invoke("meeting:session:start", {
+    profileId: "profile-1",
+    objective: "Review",
+    useCloud: true,
+    mode: "active",
+    consentAccepted: true
+  });
+  const dismissed = await harness.invoke("meeting:active:dismiss", {
+    sessionId: "meet-1",
+    questionText: "Maria, pode falar?"
+  });
+  assert.equal(dismissed.ok, true);
+});
+
+test("E2E IPC translation: start e stop", async () => {
+  const harness = createHarness();
+  const started = await harness.invoke("translation:session:start", {
+    sourceLanguage: "en",
+    targetLanguage: "pt",
+    useCloud: true,
+    consentAccepted: true
+  });
+  assert.equal(started.sessionId, "trans-1");
+
+  const status = await harness.invoke("translation:session:status");
+  assert.equal(status.active, true);
+
+  const stopped = await harness.invoke("translation:session:stop");
+  assert.equal(stopped.status, "stopped");
+});
+
+test("E2E IPC: traducao bloqueada com reuniao ativa", async () => {
+  const harness = createHarness();
+  await harness.invoke("meeting:session:start", {
+    profileId: "profile-1",
+    objective: "Sync",
+    useCloud: false,
+    consentAccepted: true
+  });
+
+  await assert.rejects(
+    () =>
+      harness.invoke("translation:session:start", {
+        sourceLanguage: "auto",
+        targetLanguage: "pt",
+        useCloud: false,
+        consentAccepted: true
+      }),
+    /reuniao/
+  );
+});
+
+test("E2E IPC env:get retorna overrides e catalogo", async () => {
+  const harness = createHarness();
+  const report = await harness.invoke("env:get");
+  assert.ok(Array.isArray(report.overrides));
+  assert.ok(Array.isArray(report.catalog));
+  assert.ok(report.catalog.length >= 5);
+  assert.equal(typeof report.env.logLevel, "string");
+});
+
+test("E2E IPC feature-flags: expoe source persisted vs env", async () => {
+  const harness = createHarness();
+  const flags = await harness.invoke("feature-flags:get");
+  assert.equal(flags.source.providerMode, "persisted");
+  assert.ok(flags.effective.providerMode);
+});
+
+test("E2E IPC meeting: exige consentAccepted", async () => {
+  const harness = createHarness();
+  await assert.rejects(
+    () =>
+      harness.invoke("meeting:session:start", {
+        profileId: "profile-1",
+        objective: "Daily",
+        useCloud: false
+      }),
+    /consentAccepted/
+  );
+});
+
+test("E2E IPC meeting: templates e consent text", async () => {
+  const harness = createHarness();
+  const templates = await harness.invoke("meeting:templates:list");
+  assert.ok(templates.templates.length >= 5);
+  const consent = await harness.invoke("meeting:consent:get");
+  assert.ok(consent.version);
+  assert.ok(consent.text);
+});
+
+test("E2E IPC meeting: mid-summary e bookmark", async () => {
+  const harness = createHarness();
+  await harness.invoke("meeting:session:start", {
+    profileId: "profile-1",
+    objective: "Planning",
+    useCloud: false,
+    consentAccepted: true
+  });
+  const mid = await harness.invoke("meeting:session:mid-summary", { sessionId: "meet-1" });
+  assert.equal(mid.summaryMarkdown, "Resumo parcial");
+  const bm = await harness.invoke("meeting:transcript:bookmark", { sessionId: "meet-1" });
+  assert.equal(bm.ok, true);
+});
+
+test("E2E IPC translation: exige consentAccepted", async () => {
+  const harness = createHarness();
+  await assert.rejects(
+    () =>
+      harness.invoke("translation:session:start", {
+        sourceLanguage: "en",
+        targetLanguage: "pt",
+        useCloud: false
+      }),
+    /consentAccepted/
+  );
+});
+
+test("E2E IPC translation: consent text", async () => {
+  const harness = createHarness();
+  const consent = await harness.invoke("translation:consent:get");
+  assert.ok(consent.version);
+  assert.ok(consent.text);
+});
+
+test("E2E IPC usage:tokens:daily", async () => {
+  const harness = createHarness({
+    tokenUsageTracker: {
+      getDailyUsage: () => ({
+        date: "2026-05-19",
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+        overDaily: false
+      })
+    }
+  });
+  const daily = await harness.invoke("usage:tokens:daily");
+  assert.equal(daily.totalTokens, 150);
 });

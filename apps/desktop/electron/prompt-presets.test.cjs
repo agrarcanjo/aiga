@@ -27,6 +27,35 @@ test("buildPromptWithPreset aplica preset default quando id não existe", () => 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.presetId, "ui-analysis");
-  assert.match(result.prompt, /Regras de resposta/);
+  assert.equal(result.presetId, "code-solver");
+  assert.match(result.prompt, /Regras globais/);
+});
+
+test("buildPromptWithPreset aceita ask vazio para analise de captura", () => {
+  const result = buildPromptWithPreset({
+    ask: "",
+    presetId: "screenshot-analysis",
+    hasScreenshots: true,
+    hasAudio: false,
+    defaultCodeLanguage: "java"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.presetId, "screenshot-analysis");
+  assert.match(result.prompt, /captura de tela/i);
+  assert.match(result.prompt, /LeetCode/i);
+  assert.match(result.prompt, /LINGUAGEM PARA CODIGO/i);
+  assert.match(result.prompt, /use java \(configuracao padrao do app\)/i);
+});
+
+test("buildPromptWithPreset resolve preset de audio sem texto do usuario", () => {
+  const result = buildPromptWithPreset({
+    ask: "",
+    hasScreenshots: false,
+    hasAudio: true
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.presetId, "audio-analysis");
+  assert.match(result.prompt, /audio gravado/i);
 });

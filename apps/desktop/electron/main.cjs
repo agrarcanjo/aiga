@@ -9,19 +9,43 @@ const { createSettingsStore } = require("./settings-store.cjs");
 const { createScreenshotService } = require("./screenshot-service.cjs");
 const { createShortcutService } = require("./shortcut-service.cjs");
 const { createGeminiProvider } = require("./gemini-provider.cjs");
+const { createOpenAiProvider } = require("./openai-provider.cjs");
+const { createAnthropicProvider } = require("./anthropic-provider.cjs");
+const { createLlmProviderRegistry } = require("./llm-provider-registry.cjs");
+const { createTokenUsageTracker } = require("./token-usage-tracker.cjs");
+const { createContextStore } = require("./context-store.cjs");
+const { createMeetingSessionOrchestrator } = require("./meeting-session-orchestrator.cjs");
+const { createAudioSourceEnumerator } = require("./audio-source-enumerator.cjs");
+const { createFfmpegInstaller } = require("./ffmpeg-installer.cjs");
+const { createAudioCaptureMeter } = require("./audio-capture-meter.cjs");
+const { createAudioSourceValidator } = require("./audio-source-validator.cjs");
+const { createAudioLoopbackCapture } = require("./audio-loopback-capture.cjs");
+const { createMeetingAudioArchive } = require("./meeting-audio-archive.cjs");
 const { createSttAdapter } = require("./stt-adapter.cjs");
 const { createStealthWindowService } = require("./stealth-window-service.cjs");
+const { applyStealthFromSettings } = require("./stealth-profile.cjs");
 const { createLocalProvider } = require("./local-provider.cjs");
 const { createProviderRouter } = require("./provider-router.cjs");
 const { createLlamaServerManager } = require("./llama-server-manager.cjs");
 const { createWhisperCliManager } = require("./whisper-cli-manager.cjs");
 const { createModelManager } = require("./model-manager.cjs");
+const { createTranscriptionPacksService } = require("./transcription-packs.cjs");
+const { createWhisperCliInstaller } = require("./whisper-cli-installer.cjs");
+const { createSetupChecklistService } = require("./setup-checklist.cjs");
 const { createAutoUpdateService } = require("./auto-update-service.cjs");
 const { createAudioQueue } = require("./audio-queue.cjs");
+const { createMeetingTrayService } = require("./meeting-tray-service.cjs");
+const { createTranslationSession } = require("./translation-session.cjs");
+const { createTranslationOverlayWindow } = require("./translation-overlay-window.cjs");
+const { createConsentAuditStore } = require("./consent-audit-store.cjs");
+const { createRetentionPurgeService } = require("./retention-purge-service.cjs");
+const { CHAT_WINDOW } = require("./window-layout.cjs");
 
 let logger;
 let shortcutService;
 let stealthWindowService;
+let settingsStoreRef;
+let envConfigRef;
 let mainWindowRef;
 let llamaServerManager;
 let whisperCliManager;
@@ -42,10 +66,10 @@ function createWindow() {
   logger.info("Creating main browser window");
 
   mainWindowRef = new BrowserWindow({
-    width: 400,
-    height: 300,
-    minWidth: 500,
-    minHeight: 240,
+    width: CHAT_WINDOW.width,
+    height: CHAT_WINDOW.height,
+    minWidth: CHAT_WINDOW.minWidth,
+    minHeight: CHAT_WINDOW.minHeight,
     frame: false,
     title: "AIGA",
     show: false,
@@ -65,9 +89,17 @@ function createWindow() {
   logger.debug("Loading renderer URL", { url });
   mainWindowRef.loadURL(url);
   mainWindowRef.once("ready-to-show", () => {
-    // Stealth é o modo padrão: usa showInactive para não roubar foco
-    if (stealthWindowService) {
-      stealthWindowService.setStealthMode({ enabled: true, hardening: "safe" });
+    if (stealthWindowService && settingsStoreRef) {
+      const effectiveFlags = resolveFeatureFlags(
+        settingsStoreRef.getFeatureFlags(),
+        envConfigRef
+      ).effective;
+      applyStealthFromSettings({
+        settingsStore: settingsStoreRef,
+        stealthWindowService,
+        effectiveFlags,
+        opacity: 0.9
+      });
     } else {
       mainWindowRef.show();
     }
@@ -81,17 +113,19 @@ app.whenReady().then(() => {
   logger = createLocalLogger({
     level: process.env.DESKTOP_LOG_LEVEL || "info"
   });
-  const settingsStore = createSettingsStore();
-  const envConfig = getEnvironmentConfig();
+  settingsStoreRef = createSettingsStore();
+  envConfigRef = getEnvironmentConfig();
+  const settingsStore = settingsStoreRef;
+  const envConfig = envConfigRef;
   const effectiveFlags = resolveFeatureFlags(settingsStore.getFeatureFlags(), envConfig).effective;
-  const screenshotService = createScreenshotService({
-    logger,
-    onQueueUpdated: (queue) => {
-      emitToAllWindows("screenshot:queue-updated", { items: queue });
-    }
-  });
 
   const geminiProvider = createGeminiProvider({ logger });
+  const openaiProvider = createOpenAiProvider({ logger });
+  const anthropicProvider = createAnthropicProvider({ logger });
+  const tokenUsageTracker = createTokenUsageTracker({
+    logger,
+    getBudget: () => settingsStore.getTokenBudget()
+  });
   modelManager = createModelManager({
     logger,
     allowNetworkDownloads: !effectiveFlags.forceLocalOnly
@@ -105,18 +139,171 @@ app.whenReady().then(() => {
     logger,
     llamaServerManager
   });
+  const llmProviderRegistry = createLlmProviderRegistry({
+    logger,
+    settingsStore,
+    geminiProvider,
+    openaiProvider,
+    anthropicProvider,
+    localProvider,
+    tokenUsageTracker
+  });
   const providerRouter = createProviderRouter({
     logger,
+    llmProviderRegistry,
     geminiProvider,
     localProvider
   });
+  const contextStore = createContextStore({ logger });
+  const consentAuditStore = createConsentAuditStore({ logger });
+  const retentionPurgeService = createRetentionPurgeService({
+    logger,
+    getRetentionDays: () => settingsStore.getPrivacySettings().retentionDays,
+    getPurgeRoots: () => {
+      const userData = app.getPath("userData");
+      return [
+        path.join(userData, "audio-captures"),
+        path.join(userData, "captures")
+      ];
+    }
+  });
+  retentionPurgeService.schedule();
   whisperCliManager = createWhisperCliManager({
     logger,
-    modelManager
+    modelManager,
+    settingsStore
   });
   const sttAdapter = createSttAdapter({
     logger,
     whisperCliManager
+  });
+  const audioSourceEnumerator = createAudioSourceEnumerator({ logger });
+  const ffmpegInstaller = createFfmpegInstaller({
+    logger,
+    emitProgress: (payload) => emitToAllWindows("audio:ffmpeg:progress", payload)
+  });
+  const audioCaptureMeter = createAudioCaptureMeter({
+    logger,
+    emitLevel: (payload) => emitToAllWindows("audio:capture:level", payload)
+  });
+  void ffmpegInstaller.getStatus().then((st) => {
+    if (!st.available || st.wasapiSupported === false) {
+      logger.warn("ffmpeg WASAPI not ready — loopback/translation will fail until reinstall", {
+        path: st.path,
+        lastError: st.lastError
+      });
+      return;
+    }
+    logger.info("ffmpeg ready", { path: st.path, wasapiSupported: st.wasapiSupported });
+  });
+  const whisperCliInstaller = createWhisperCliInstaller({ logger });
+  const transcriptionPacksService = createTranscriptionPacksService({
+    logger,
+    settingsStore,
+    modelManager,
+    whisperCliManager,
+    whisperCliInstaller,
+    ffmpegInstaller,
+    emitProgress: (payload) =>
+      emitToAllWindows("transcription:packs:progress", {
+        ...payload,
+        emittedAtIso: new Date().toISOString()
+      })
+  });
+  const setupChecklistService = createSetupChecklistService({
+    settingsStore,
+    transcriptionPacksService,
+    ffmpegInstaller,
+    audioSourceEnumerator
+  });
+  const audioSourceValidator = createAudioSourceValidator({ logger });
+  stealthWindowService = createStealthWindowService({
+    logger,
+    getMainWindow: () => mainWindowRef
+  });
+  let meetingOrchestrator;
+  let translationSession;
+  const meetingTrayService = createMeetingTrayService({
+    logger,
+    onStop: (sessionId) =>
+      meetingOrchestrator?.stopSession({ sessionId }).catch((err) => {
+        logger.error("Tray stop meeting failed", { message: String(err) });
+      }),
+    onCancel: (sessionId) => {
+      try {
+        meetingOrchestrator?.cancelSession({ sessionId });
+      } catch (err) {
+        logger.error("Tray cancel meeting failed", { message: String(err) });
+      }
+    },
+    onShowWindow: () => {
+      const win = mainWindowRef;
+      if (win && !win.isDestroyed()) {
+        if (win.isMinimized()) {
+          win.restore();
+        }
+        win.show();
+        win.focus();
+      }
+    }
+  });
+  const meetingAudioArchive = createMeetingAudioArchive({ logger, settingsStore });
+  const audioLoopbackCapture = createAudioLoopbackCapture({
+    logger,
+    sttAdapter,
+    meetingAudioArchive,
+    archiveKind: "meeting",
+    audioCaptureMeter,
+    getApiKey: () => settingsStore.getGeminiApiKey(),
+    getEffectiveFlags: () =>
+      resolveFeatureFlags(settingsStore.getFeatureFlags(), envConfig).effective,
+    onTranscript: (sessionId, text) => {
+      meetingOrchestrator?.appendTranscript(sessionId, `${text} `);
+    }
+  });
+  meetingOrchestrator = createMeetingSessionOrchestrator({
+    logger,
+    llmProviderRegistry,
+    contextStore,
+    tokenUsageTracker,
+    localProvider,
+    settingsStore,
+    audioSourceValidator,
+    audioLoopbackCapture,
+    emitRendererEvent: emitToAllWindows,
+    getStealthState: () => stealthWindowService.getState(),
+    meetingTrayService,
+    consentAuditStore
+  });
+
+  const translationOverlayWindow = createTranslationOverlayWindow({
+    logger,
+    getOverlayUrl: () => {
+      const base =
+        process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
+      return `${base}?view=translation-overlay`;
+    },
+    getStealthHardening: () =>
+      resolveFeatureFlags(settingsStore.getFeatureFlags(), envConfig).effective
+        .stealthHardening
+  });
+
+  translationSession = createTranslationSession({
+    logger,
+    sttAdapter,
+    llmProviderRegistry,
+    localProvider,
+    settingsStore,
+    tokenUsageTracker,
+    translationOverlayWindow,
+    consentAuditStore,
+    meetingAudioArchive,
+    transcriptionPacksService,
+    audioCaptureMeter,
+    emitRendererEvent: emitToAllWindows,
+    getApiKey: () => settingsStore.getGeminiApiKey(),
+    getEffectiveFlags: () =>
+      resolveFeatureFlags(settingsStore.getFeatureFlags(), envConfig).effective
   });
   autoUpdateService = createAutoUpdateService({
     logger,
@@ -126,10 +313,15 @@ app.whenReady().then(() => {
   });
   const audioQueue = createAudioQueue({ logger });
 
-  stealthWindowService = createStealthWindowService({
+  const screenshotService = createScreenshotService({
     logger,
-    getMainWindow: () => mainWindowRef
+    settingsStore,
+    onQueueUpdated: (queue) => {
+      emitToAllWindows("screenshot:queue-updated", { items: queue });
+    },
+    stealthWindowService
   });
+
   shortcutService = createShortcutService({
     logger,
     settingsStore,
@@ -151,6 +343,21 @@ app.whenReady().then(() => {
     audioQueue,
     shortcutService,
     providerRouter,
+    llmProviderRegistry,
+    tokenUsageTracker,
+    meetingOrchestrator,
+    translationSession,
+    audioLoopbackCapture,
+    contextStore,
+    consentAuditStore,
+    retentionPurgeService,
+    audioSourceEnumerator,
+    ffmpegInstaller,
+    audioCaptureMeter,
+    meetingAudioArchive,
+    transcriptionPacksService,
+    setupChecklistService,
+    audioSourceValidator,
     sttAdapter,
     autoUpdateService,
     stealthWindowService,
@@ -165,8 +372,9 @@ app.whenReady().then(() => {
     win.webContents.once("did-finish-load", () => {
       emitToAllWindows("stealth:state-changed", {
         enabled: true,
+        fullStealth: false,
         hardening: "safe",
-        opacity: 0.8,
+        opacity: 0.9,
         source: "ipc",
         appliedAtIso: new Date().toISOString()
       });

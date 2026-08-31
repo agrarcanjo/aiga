@@ -11,7 +11,43 @@ function createShortcutService(options) {
   const emitRendererEvent = options.emitRendererEvent;
 
   let registeredCaptureShortcut = null;
-  let registeredStealthShortcut = null;
+  let registeredFullStealthShortcut = null;
+  let registeredPushToTalkShortcut = null;
+
+  function emitStealthState(source, state) {
+    if (typeof emitRendererEvent !== "function") {
+      return;
+    }
+    emitRendererEvent("stealth:state-changed", {
+      enabled: state.enabled,
+      fullStealth: Boolean(state.fullStealth),
+      hardening: state.hardening,
+      opacity: state.opacity,
+      source,
+      appliedAtIso: state.appliedAtIso || new Date().toISOString()
+    });
+  }
+
+  /**
+   * Antes de qualquer outro atalho: sai do full stealth e volta ao stealth visível.
+   */
+  function restoreStealthVisibility(source) {
+    if (settingsStore.getNonStealthModeEnabled()) {
+      return stealthWindowService.getState();
+    }
+    const result = stealthWindowService.exitFullStealthIfActive();
+    if (result.changed) {
+      emitStealthState(source, result);
+    }
+    return result;
+  }
+
+  function wrapWithStealthRestore(handler, source) {
+    return () => {
+      restoreStealthVisibility(source);
+      handler();
+    };
+  }
 
   async function handleCaptureShortcut() {
     try {
@@ -20,9 +56,12 @@ function createShortcutService(options) {
         trigger: "shortcut"
       });
       if (typeof emitRendererEvent === "function") {
+        const items = Array.isArray(item.items) && item.items.length > 0 ? item.items : [item];
         emitRendererEvent("screenshot:quick-analyze", {
           captureId: item.captureId,
-          previewDataUrl: item.previewDataUrl
+          previewDataUrl: item.previewDataUrl,
+          captureIds: items.map((entry) => entry.captureId),
+          previewDataUrls: items.map((entry) => entry.previewDataUrl)
         });
       }
     } catch (error) {
@@ -32,81 +71,94 @@ function createShortcutService(options) {
     }
   }
 
-  function emitStealthState(source, applied) {
-    if (typeof emitRendererEvent === "function") {
-      emitRendererEvent("stealth:state-changed", {
-        enabled: applied.enabled,
-        hardening: applied.hardening,
-        source,
-        appliedAtIso: applied.appliedAtIso
-      });
+  function handleFullStealthShortcut() {
+    if (settingsStore.getNonStealthModeEnabled()) {
+      return;
     }
-  }
-
-  function handleStealthShortcut() {
     try {
       const env = getEnvironmentConfig();
       const effectiveFlags = resolveFeatureFlags(settingsStore.getFeatureFlags(), env).effective;
-      const applied = stealthWindowService.toggleStealthMode({
-        hardening: effectiveFlags.stealthHardening
+      const state = stealthWindowService.getState();
+      const applied = stealthWindowService.toggleFullStealthMode({
+        hardening: effectiveFlags.stealthHardening,
+        opacity: state.opacity
       });
       emitStealthState("shortcut", applied);
     } catch (error) {
-      logger.error("Global stealth shortcut failed", {
+      logger.error("Global full stealth shortcut failed", {
         message: error instanceof Error ? error.message : "Unknown error"
       });
     }
   }
 
-  function registerCaptureShortcut() {
-    const settings = settingsStore.getPublicSettings();
-    const accelerator = settings.shortcuts.captureScreen;
-
-    if (registeredCaptureShortcut) {
-      globalShortcut.unregister(registeredCaptureShortcut);
-      registeredCaptureShortcut = null;
+  function handlePushToTalkShortcut() {
+    if (typeof emitRendererEvent === "function") {
+      emitRendererEvent("shortcut:push-to-talk", {
+        triggeredAtIso: new Date().toISOString()
+      });
     }
+  }
 
-    const success = globalShortcut.register(accelerator, () => {
-      void handleCaptureShortcut();
-    });
-
+  function registerShortcut(accelerator, handler, label) {
+    const success = globalShortcut.register(accelerator, handler);
     if (!success) {
-      throw new Error(`Unable to register global shortcut: ${accelerator}`);
+      throw new Error(`Unable to register global shortcut (${label}): ${accelerator}`);
     }
-
-    registeredCaptureShortcut = accelerator;
-    logger.info("Registered global capture shortcut", { accelerator });
+    logger.info("Registered global shortcut", { label, accelerator });
     return accelerator;
   }
 
-  function registerStealthShortcut() {
+  function unregisterIfRegistered(current) {
+    if (current) {
+      globalShortcut.unregister(current);
+    }
+    return null;
+  }
+
+  function registerCaptureShortcut() {
     const settings = settingsStore.getPublicSettings();
-    const accelerator = settings.shortcuts.toggleStealth;
+    const accelerator = settings.shortcuts.captureScreen;
+    registeredCaptureShortcut = unregisterIfRegistered(registeredCaptureShortcut);
+    registeredCaptureShortcut = registerShortcut(
+      accelerator,
+      () => {
+        void handleCaptureShortcut();
+      },
+      "capture"
+    );
+    return registeredCaptureShortcut;
+  }
 
-    if (registeredStealthShortcut) {
-      globalShortcut.unregister(registeredStealthShortcut);
-      registeredStealthShortcut = null;
-    }
+  function registerFullStealthShortcut() {
+    const settings = settingsStore.getPublicSettings();
+    const accelerator = settings.shortcuts.toggleFullStealth || "Ctrl+Shift+H";
+    registeredFullStealthShortcut = unregisterIfRegistered(registeredFullStealthShortcut);
+    registeredFullStealthShortcut = registerShortcut(
+      accelerator,
+      handleFullStealthShortcut,
+      "toggle-full-stealth"
+    );
+    return registeredFullStealthShortcut;
+  }
 
-    const success = globalShortcut.register(accelerator, () => {
-      handleStealthShortcut();
-    });
-
-    if (!success) {
-      throw new Error(`Unable to register global shortcut: ${accelerator}`);
-    }
-
-    registeredStealthShortcut = accelerator;
-    logger.info("Registered global stealth shortcut", { accelerator });
-    return accelerator;
+  function registerPushToTalkShortcut() {
+    const settings = settingsStore.getPublicSettings();
+    const accelerator = settings.shortcuts.pushToTalk || "Ctrl+D";
+    registeredPushToTalkShortcut = unregisterIfRegistered(registeredPushToTalkShortcut);
+    registeredPushToTalkShortcut = registerShortcut(
+      accelerator,
+      wrapWithStealthRestore(handlePushToTalkShortcut, "shortcut"),
+      "push-to-talk"
+    );
+    return registeredPushToTalkShortcut;
   }
 
   function refreshShortcuts() {
     try {
       return {
         captureShortcut: registerCaptureShortcut(),
-        stealthShortcut: registerStealthShortcut()
+        fullStealthShortcut: registerFullStealthShortcut(),
+        pushToTalkShortcut: registerPushToTalkShortcut()
       };
     } catch (error) {
       logger.error("Failed to refresh shortcuts", {
@@ -123,13 +175,15 @@ function createShortcutService(options) {
   function dispose() {
     globalShortcut.unregisterAll();
     registeredCaptureShortcut = null;
-    registeredStealthShortcut = null;
+    registeredFullStealthShortcut = null;
+    registeredPushToTalkShortcut = null;
     logger.info("Unregistered all global shortcuts");
   }
 
   return {
     refreshShortcuts,
     refreshCaptureShortcut,
+    restoreStealthVisibility,
     dispose
   };
 }

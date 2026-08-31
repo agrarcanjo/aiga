@@ -3,10 +3,12 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type {
   ChatStreamEvent,
-  LogLevel,
   ScreenshotQueueItem,
   StealthStateChangedEvent,
 } from "@clone-perssua/shared-types";
+import { MeetingModePanel } from "./components/MeetingModePanel";
+import { SettingsPage, type SettingsTabId } from "./components/SettingsPage";
+import { TranslationModePanel } from "./components/TranslationModePanel";
 
 // ─── Constantes ─────────────────────────────────────────────────────────────
 
@@ -29,7 +31,7 @@ interface ChatMessage {
   linkedAudioDuration?: number;
 }
 
-type SettingsTab = "microphone" | "api" | "resources" | "shortcuts" | "logs";
+type AppMode = "chat" | "meeting" | "translation";
 
 // ─── Design tokens (dark theme) ─────────────────────────────────────────────
 
@@ -64,48 +66,6 @@ function iconBtn(active?: boolean, danger?: boolean): React.CSSProperties {
   };
 }
 
-function inputStyle(): React.CSSProperties {
-  return {
-    background: C.surface2,
-    border: `1px solid ${C.border}`,
-    borderRadius: 6,
-    color: C.text,
-    padding: "8px 10px",
-    fontSize: 13,
-    outline: "none",
-    fontFamily: "inherit",
-    width: "100%",
-    boxSizing: "border-box",
-  };
-}
-
-function primaryBtn(): React.CSSProperties {
-  return {
-    background: C.accent,
-    border: "none",
-    borderRadius: 6,
-    color: "#fff",
-    padding: "8px 16px",
-    cursor: "pointer",
-    fontSize: 13,
-    fontWeight: 600,
-    alignSelf: "flex-start",
-  };
-}
-
-function secondaryBtn(): React.CSSProperties {
-  return {
-    background: C.surface2,
-    border: `1px solid ${C.border}`,
-    borderRadius: 6,
-    color: C.text,
-    padding: "8px 14px",
-    cursor: "pointer",
-    fontSize: 13,
-    alignSelf: "flex-start",
-  };
-}
-
 // ─── App component ───────────────────────────────────────────────────────────
 
 export function App(): JSX.Element {
@@ -129,19 +89,10 @@ export function App(): JSX.Element {
   const [opacity, setOpacity] = useState(0.8);
   const [opacityOpen, setOpacityOpen] = useState(false);
 
-  // ── Settings modal ──────────────────────────────────────────────────────
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("api");
-
-  // ── Settings — API ──────────────────────────────────────────────────────
-  const [geminiApiKey, setGeminiApiKey] = useState("");
-  const [hasGeminiApiKey, setHasGeminiApiKey] = useState(false);
-  const [apiSaveStatus, setApiSaveStatus] = useState("");
-
-  // ── Settings — Microphone ────────────────────────────────────────────────
-  const [audioDevices, setAudioDevices] = useState<{ deviceId: string; label: string }[]>([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState("");
-  const [micStatus, setMicStatus] = useState("");
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId>("general");
+  const [appMode, setAppMode] = useState<AppMode>("chat");
+  const [chatExpanded, setChatExpanded] = useState(false);
 
   // ── Settings — Resources ─────────────────────────────────────────────────
   const [selectToPrompt, setSelectToPrompt] = useState(false);
@@ -149,12 +100,6 @@ export function App(): JSX.Element {
   // ── Settings — Shortcuts ─────────────────────────────────────────────────
   const [captureShortcut, setCaptureShortcut] = useState("Ctrl+E");
   const [pushToTalkShortcut, setPushToTalkShortcut] = useState("Ctrl+D");
-  const [stealthShortcut, setStealthShortcut] = useState("Ctrl+B");
-  const [shortcutSaveStatus, setShortcutSaveStatus] = useState("");
-
-  // ── Settings — Logs ──────────────────────────────────────────────────────
-  const [recentLogs, setRecentLogs] = useState<string[]>([]);
-  const [logLevel, setLogLevel] = useState<LogLevel>("info");
 
   // ── Audio recording ────────────────────────────────────────────────────────────────────────
   const [audioReady, setAudioReady] = useState(false);
@@ -171,7 +116,6 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     void loadSettings();
-    void loadDiagnostics();
     void loadScreenshotQueue();
 
     const unsubQ = window.desktopApi.onScreenshotQueueUpdated((p) => {
@@ -180,7 +124,13 @@ export function App(): JSX.Element {
     const unsubChat = window.desktopApi.onChatStreamEvent(handleChatStreamEvent);
     const unsubStealth = window.desktopApi.onStealthStateChanged(handleStealthStateChanged);
     const unsubQuick = window.desktopApi.onQuickAnalyze((p) => {
-      void submitAsk(DEFAULT_SCREENSHOT_PROMPT, [p.captureId], [p.previewDataUrl]);
+      const captureIds =
+        Array.isArray(p.captureIds) && p.captureIds.length > 0 ? p.captureIds : [p.captureId];
+      const previewDataUrls =
+        Array.isArray(p.previewDataUrls) && p.previewDataUrls.length > 0
+          ? p.previewDataUrls
+          : [p.previewDataUrl];
+      void submitAsk(DEFAULT_SCREENSHOT_PROMPT, captureIds, previewDataUrls);
     });
 
     // Probe de dispositivos de audio sem solicitar permissao
@@ -238,25 +188,22 @@ export function App(): JSX.Element {
     };
   }, [opacityOpen]);
 
+  useEffect(() => {
+    if (settingsOpen) {
+      void window.desktopApi.setWindowLayout("settings");
+      return;
+    }
+    void window.desktopApi.setWindowLayout(chatExpanded ? "expanded" : "chat");
+  }, [settingsOpen, chatExpanded]);
+
   // ── IPC loaders ─────────────────────────────────────────────────────────
 
   async function loadSettings(): Promise<void> {
     try {
       const r = await window.desktopApi.getSettings();
-      setSelectedDeviceId(r.settings.selectedAudioInputDeviceId || "");
       setCaptureShortcut(r.settings.shortcuts.captureScreen);
       setPushToTalkShortcut(r.settings.shortcuts.pushToTalk);
-      setStealthShortcut(r.settings.shortcuts.toggleStealth);
-      setHasGeminiApiKey(r.settings.hasGeminiApiKey);
       setHasLlm(r.settings.hasGeminiApiKey);
-    } catch { /* silent */ }
-  }
-
-  async function loadDiagnostics(): Promise<void> {
-    try {
-      const r = await window.desktopApi.getDiagnostics();
-      setLogLevel(r.logLevel);
-      setRecentLogs(r.recentLines);
     } catch { /* silent */ }
   }
 
@@ -265,24 +212,6 @@ export function App(): JSX.Element {
       const r = await window.desktopApi.getScreenshotQueue();
       setScreenshotQueue(r.items);
     } catch { /* silent */ }
-  }
-
-  async function loadAudioDevices(): Promise<void> {
-    try {
-      const stream = await globalThis.navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
-      const devices = await globalThis.navigator.mediaDevices.enumerateDevices();
-      const inputs = devices
-        .filter((d) => d.kind === "audioinput")
-        .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Microfone ${i + 1}` }));
-      setAudioDevices(inputs);
-      if (inputs.length > 0 && !inputs.some((d) => d.deviceId === selectedDeviceId)) {
-        setSelectedDeviceId(inputs[0].deviceId);
-      }
-      setMicStatus(`${inputs.length} dispositivo(s) encontrado(s).`);
-    } catch (e) {
-      setMicStatus(`Permissão negada: ${e instanceof Error ? e.message : "erro"}`);
-    }
   }
 
   // ── IPC event handlers ───────────────────────────────────────────────────
@@ -395,12 +324,14 @@ export function App(): JSX.Element {
     }
 
     try {
+      const settingsRes = await window.desktopApi.getSettings();
+      const micId = settingsRes.settings.selectedAudioInputDeviceId;
       const audioConstraint: MediaTrackConstraints = {
         channelCount: 1,
         sampleRate: 16000,
         echoCancellation: true,
         noiseSuppression: true,
-        ...(selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : {}),
+        ...(micId ? { deviceId: { exact: micId } } : {}),
       };
       const stream = await globalThis.navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
       activeStreamRef.current = stream;
@@ -583,57 +514,6 @@ export function App(): JSX.Element {
 
   // ── Settings: save ───────────────────────────────────────────────────────
 
-  async function handleSaveApi(): Promise<void> {
-    try {
-      const r = await window.desktopApi.saveSettings({
-        geminiApiKey: geminiApiKey.trim() || undefined,
-      });
-      setHasGeminiApiKey(r.settings.hasGeminiApiKey);
-      setHasLlm(r.settings.hasGeminiApiKey);
-      setGeminiApiKey("");
-      setApiSaveStatus("API key salva com sucesso.");
-    } catch (e) {
-      setApiSaveStatus(`Erro: ${e instanceof Error ? e.message : "desconhecido"}`);
-    }
-  }
-
-  async function handleSaveShortcuts(): Promise<void> {
-    try {
-      await window.desktopApi.saveSettings({
-        shortcuts: {
-          captureScreen: captureShortcut,
-          pushToTalk: pushToTalkShortcut,
-          toggleStealth: stealthShortcut,
-        },
-      });
-      setShortcutSaveStatus("Atalhos salvos.");
-    } catch (e) {
-      setShortcutSaveStatus(`Erro: ${e instanceof Error ? e.message : "desconhecido"}`);
-    }
-  }
-
-  async function handleSaveMic(): Promise<void> {
-    try {
-      await window.desktopApi.saveSettings({
-        selectedAudioInputDeviceId: selectedDeviceId || null,
-      });
-      setMicStatus("Microfone salvo.");
-    } catch { /* silent */ }
-  }
-
-  async function handleToggleStealth(): Promise<void> {
-    try {
-      const r = await window.desktopApi.setStealthMode({ enabled: !stealthEnabled });
-      setStealthEnabled(r.enabled);
-      // Sync opacity slider with the value the main process applied
-      if (r.enabled && typeof r.opacity === "number") {
-        setOpacity(r.opacity);
-      } else if (!r.enabled) {
-        setOpacityOpen(false);
-      }
-    } catch { /* silent */ }
-  }
-
   async function handleSetOpacity(value: number): Promise<void> {
     setOpacity(value);
     try {
@@ -727,7 +607,7 @@ export function App(): JSX.Element {
               title={hasLlm ? "LLM configurado" : "Nenhuma LLM configurada — clique para configurar"}
               style={iconBtn()}
               onClick={() => {
-                setSettingsTab("api");
+                setSettingsTab("ia");
                 setSettingsOpen(true);
               }}
             >
@@ -756,61 +636,75 @@ export function App(): JSX.Element {
               📷
             </button>
 
-            {/* Microphone */}
-            {!audioReady ? (
-              <button
-                type="button"
-                title="Microfone não configurado — clique para configurar"
-                style={{ ...iconBtn(), opacity: 0.4 }}
-                onClick={() => { setSettingsTab("microphone"); setSettingsOpen(true); }}
-              >
-                🎤️
-              </button>
-            ) : isRecording ? (
-              <button
-                type="button"
-                title="Parar gravação"
-                style={{ ...iconBtn(), display: "flex", alignItems: "center", gap: 3, color: C.error }}
-                onClick={() => stopRecording()}
-              >
-                <span style={{ fontSize: 10 }}>🔴</span>
-                <span style={{ fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
-                  {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}
-                </span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                title={`Gravar áudio (${pushToTalkShortcut})`}
-                style={iconBtn()}
-                onClick={() => void toggleRecording()}
-              >
-                🎤️
-              </button>
+            {/* Microphone — only in chat (reunião/entrevista usam captura de sistema) */}
+            {appMode === "chat" && (
+              !audioReady ? (
+                <button
+                  type="button"
+                  title="Microfone não configurado — clique para configurar"
+                  style={{ ...iconBtn(), opacity: 0.4 }}
+                  onClick={() => { setSettingsTab("microphone"); setSettingsOpen(true); }}
+                >
+                  🎤️
+                </button>
+              ) : isRecording ? (
+                <button
+                  type="button"
+                  title="Parar gravação"
+                  style={{ ...iconBtn(), display: "flex", alignItems: "center", gap: 3, color: C.error }}
+                  onClick={() => stopRecording()}
+                >
+                  <span style={{ fontSize: 10 }}>🔴</span>
+                  <span style={{ fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                    {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  title={`Gravar áudio (${pushToTalkShortcut})`}
+                  style={iconBtn()}
+                  onClick={() => void toggleRecording()}
+                >
+                  🎤️
+                </button>
+              )
             )}
 
-            {/* Translation shortcut */}
+            {/* Modo reunião */}
             <button
               type="button"
-              title="Preencher campo com pedido de tradução"
-              style={iconBtn()}
-              onClick={() => setAskText("Traduza para português: ")}
+              title="Modo reunião"
+              style={iconBtn(appMode === "meeting")}
+              onClick={() => {
+                setAppMode("meeting");
+                setSettingsOpen(false);
+              }}
+            >
+              📋
+            </button>
+
+            {/* Modo tradução ao vivo */}
+            <button
+              type="button"
+              title="Tradução ao vivo"
+              style={iconBtn(appMode === "translation")}
+              onClick={() => {
+                setAppMode("translation");
+                setSettingsOpen(false);
+              }}
             >
               🌐
             </button>
 
-            {/* Stealth toggle */}
+            {/* Chat */}
             <button
               type="button"
-              title={
-                stealthEnabled
-                  ? `Stealth ativo (${stealthShortcut}) — clique para desativar`
-                  : `Stealth inativo (${stealthShortcut}) — clique para ativar`
-              }
-              style={iconBtn(stealthEnabled)}
-              onClick={() => void handleToggleStealth()}
+              title="Modo chat"
+              style={iconBtn(appMode === "chat")}
+              onClick={() => setAppMode("chat")}
             >
-              {stealthEnabled ? "👁️" : "🙈"}
+              💬
             </button>
 
             {/* Opacity control — visible only in stealth mode */}
@@ -863,12 +757,30 @@ export function App(): JSX.Element {
             </div>
             )}
 
+            {/* Maximize / restore — same size as settings, for reading agent answers */}
+            {!settingsOpen && (
+              <button
+                type="button"
+                title={chatExpanded ? "Modo normal" : "Maximizar tela de resposta"}
+                style={iconBtn(chatExpanded)}
+                onClick={() => setChatExpanded((v) => !v)}
+              >
+                {chatExpanded ? "❐" : "⛶"}
+              </button>
+            )}
+
             {/* Settings */}
             <button
               type="button"
-              title="Configurações"
-              style={iconBtn()}
-              onClick={() => setSettingsOpen(true)}
+              title={settingsOpen ? "Voltar ao chat" : "Configurações"}
+              style={iconBtn(settingsOpen)}
+              onClick={() => {
+                if (settingsOpen) {
+                  setSettingsOpen(false);
+                } else {
+                  setSettingsOpen(true);
+                }
+              }}
             >
               ⚙️
             </button>
@@ -900,6 +812,48 @@ export function App(): JSX.Element {
           </div>
         </div>
 
+        {settingsOpen ? (
+          <SettingsPage
+            initialTab={settingsTab}
+            onClose={() => setSettingsOpen(false)}
+            opacity={opacity}
+            onOpacityChange={(v) => void handleSetOpacity(v)}
+            autoScroll={autoScroll}
+            onAutoScrollChange={setAutoScroll}
+            selectToPrompt={selectToPrompt}
+            onSelectToPromptChange={setSelectToPrompt}
+            quickAnalysis={quickAnalysis}
+            onQuickAnalysisChange={setQuickAnalysis}
+            onSettingsChanged={() => void loadSettings()}
+          />
+        ) : appMode === "meeting" ? (
+          <div
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: chatExpanded ? "16px 20px" : "10px 12px",
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+            }}
+          >
+            <MeetingModePanel stealthEnabled={stealthEnabled} expanded={chatExpanded} />
+          </div>
+        ) : appMode === "translation" ? (
+          <div
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: chatExpanded ? "16px 20px" : "10px 12px",
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+            }}
+          >
+            <TranslationModePanel stealthEnabled={stealthEnabled} expanded={chatExpanded} />
+          </div>
+        ) : (
+        <>
         {/* ── Chat timeline ─────────────────────────────────────────── */}
         <div
           style={{
@@ -1124,11 +1078,11 @@ export function App(): JSX.Element {
         {/* ── Input bar ─────────────────────────────────────────────── */}
         <div
           style={{
-            padding: "8px 12px",
+            padding: chatExpanded ? "12px 20px" : "8px 12px",
             borderTop: `1px solid ${C.border}`,
             display: "flex",
             gap: 8,
-            alignItems: "flex-end",
+            alignItems: "stretch",
             background: C.surface,
           }}
         >
@@ -1137,7 +1091,7 @@ export function App(): JSX.Element {
             onChange={(e) => setAskText(e.target.value)}
             onKeyDown={handleAskKeyDown}
             placeholder="Digite sua pergunta… (Ctrl+Enter para enviar)"
-            rows={2}
+            rows={chatExpanded ? 4 : 2}
             style={{
               flex: 1,
               background: C.surface2,
@@ -1151,10 +1105,12 @@ export function App(): JSX.Element {
               fontFamily: "inherit",
               lineHeight: 1.5,
               userSelect: "text",
+              minHeight: chatExpanded ? 96 : 56,
             }}
           />
           <button
             type="button"
+            title="Enviar (Ctrl+Enter)"
             disabled={isSubmitting || !askText.trim()}
             onClick={() => void handleSendAsk()}
             style={{
@@ -1164,472 +1120,24 @@ export function App(): JSX.Element {
               borderRadius: 8,
               color:
                 isSubmitting || !askText.trim() ? C.textMuted : "#fff",
-              padding: "10px 14px",
+              padding: "0 16px",
+              minWidth: 52,
+              alignSelf: "stretch",
               cursor:
                 isSubmitting || !askText.trim() ? "not-allowed" : "pointer",
-              fontSize: 18,
+              fontSize: 20,
               lineHeight: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            {isSubmitting ? "⟳" : "↑"}
+            {isSubmitting ? "⟳" : "⏎"}
           </button>
         </div>
+        </>
+        )}
       </div>
-
-      {/* ── Settings modal ────────────────────────────────────────────── */}
-      {settingsOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Configurações"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setSettingsOpen(false);
-          }}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.72)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-        >
-          <div
-            style={{
-              background: C.surface,
-              border: `1px solid ${C.border}`,
-              borderRadius: 12,
-              width: 520,
-              maxWidth: "95vw",
-              maxHeight: "82vh",
-              display: "flex",
-              flexDirection: "column",
-              overflow: "hidden",
-            }}
-          >
-            {/* Modal header */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "14px 18px",
-                borderBottom: `1px solid ${C.border}`,
-              }}
-            >
-              <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>
-                Configurações — AIGA
-              </span>
-              <button
-                type="button"
-                aria-label="Fechar configurações"
-                style={iconBtn()}
-                onClick={() => setSettingsOpen(false)}
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Tab bar */}
-            <div
-              style={{
-                display: "flex",
-                borderBottom: `1px solid ${C.border}`,
-                overflowX: "auto",
-              }}
-            >
-              {(
-                [
-                  ["api", "API"],
-                  ["microphone", "Microfone"],
-                  ["resources", "Recursos"],
-                  ["shortcuts", "Atalhos"],
-                  ["logs", "Logs"],
-                ] as [SettingsTab, string][]
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setSettingsTab(id)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    borderBottom:
-                      settingsTab === id
-                        ? `2px solid ${C.accent}`
-                        : "2px solid transparent",
-                    color: settingsTab === id ? C.accent : C.textMuted,
-                    padding: "10px 16px",
-                    cursor: "pointer",
-                    fontSize: 12,
-                    fontWeight: settingsTab === id ? 600 : 400,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab content */}
-            <div
-              style={{ flex: 1, overflowY: "auto", padding: "18px" }}
-            >
-              {/* ── API tab ────────────────────────────────────────── */}
-              {settingsTab === "api" && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 14,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        color: hasGeminiApiKey ? C.success : C.error,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {hasGeminiApiKey
-                        ? "✓ API Key configurada"
-                        : "✗ API Key não configurada"}
-                    </span>
-                  </div>
-                  <label style={{ color: C.textMuted, fontSize: 12 }}>
-                    Gemini API Key
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="AIza…"
-                    value={geminiApiKey}
-                    onChange={(e) => setGeminiApiKey(e.target.value)}
-                    style={inputStyle()}
-                  />
-                  <p style={{ color: C.textMuted, fontSize: 11, margin: 0 }}>
-                    Obtenha gratuitamente em{" "}
-                    <span style={{ color: C.accent }}>
-                      aistudio.google.com/apikey
-                    </span>
-                  </p>
-                  <p style={{ color: C.textMuted, fontSize: 11, margin: 0 }}>
-                    Modelo ativo:{" "}
-                    <code style={{ color: C.text }}>gemini-2.5-flash</code>{" "}
-                    (configurável via{" "}
-                    <code style={{ color: C.text }}>GEMINI_MODEL</code> no{" "}
-                    <code style={{ color: C.text }}>.env</code>)
-                  </p>
-                  <button
-                    type="button"
-                    disabled={!geminiApiKey.trim()}
-                    style={{
-                      ...primaryBtn(),
-                      opacity: geminiApiKey.trim() ? 1 : 0.5,
-                      cursor: geminiApiKey.trim() ? "pointer" : "not-allowed",
-                    }}
-                    onClick={() => void handleSaveApi()}
-                  >
-                    Salvar
-                  </button>
-                  {apiSaveStatus && (
-                    <span style={{ color: C.success, fontSize: 12 }}>
-                      {apiSaveStatus}
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {/* ── Microphone tab ──────────────────────────────────── */}
-              {settingsTab === "microphone" && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 14,
-                  }}
-                >
-                  <button
-                    type="button"
-                    style={secondaryBtn()}
-                    onClick={() => void loadAudioDevices()}
-                  >
-                    Solicitar permissão e listar dispositivos
-                  </button>
-                  {micStatus && (
-                    <span style={{ color: C.textMuted, fontSize: 12 }}>
-                      {micStatus}
-                    </span>
-                  )}
-                  {audioDevices.length > 0 && (
-                    <>
-                      <label style={{ color: C.textMuted, fontSize: 12 }}>
-                        Microfone ativo
-                      </label>
-                      <select
-                        value={selectedDeviceId}
-                        onChange={(e) => setSelectedDeviceId(e.target.value)}
-                        style={inputStyle()}
-                      >
-                        {audioDevices.map((d) => (
-                          <option key={d.deviceId} value={d.deviceId}>
-                            {d.label}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        style={primaryBtn()}
-                        onClick={() => void handleSaveMic()}
-                      >
-                        Salvar microfone
-                      </button>
-                    </>
-                  )}
-                  <p style={{ color: C.textMuted, fontSize: 11, margin: 0 }}>
-                    No Windows: Configurações → Privacidade e segurança →
-                    Microfone
-                  </p>
-                </div>
-              )}
-
-              {/* ── Resources tab ───────────────────────────────────── */}
-              {settingsTab === "resources" && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 20,
-                  }}
-                >
-                  <ResourceToggle
-                    label="Rolagem automática"
-                    description="A conversa rola automaticamente para a resposta mais recente. Pausa ao rolar para cima e retoma ao voltar ao final."
-                    value={autoScroll}
-                    onChange={setAutoScroll}
-                  />
-                  <ResourceToggle
-                    label="Selecionar para prompt"
-                    description="Selecionar texto e pressionar Ctrl+C analisa automaticamente o conteúdo e preenche o campo de texto."
-                    value={selectToPrompt}
-                    onChange={setSelectToPrompt}
-                  />
-                  <ResourceToggle
-                    label="Análise rápida de screenshots"
-                    description="Ao capturar, envia imediatamente com prompt padrão otimizado. Desative para revisar o prompt antes de enviar."
-                    value={quickAnalysis}
-                    onChange={setQuickAnalysis}
-                  />
-                </div>
-              )}
-
-              {/* ── Shortcuts tab ───────────────────────────────────── */}
-              {settingsTab === "shortcuts" && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 14,
-                  }}
-                >
-                  {(
-                    [
-                      [
-                        "Captura de tela",
-                        captureShortcut,
-                        setCaptureShortcut,
-                      ],
-                      [
-                        "Push-to-talk (microfone)",
-                        pushToTalkShortcut,
-                        setPushToTalkShortcut,
-                      ],
-                      ["Toggle stealth", stealthShortcut, setStealthShortcut],
-                    ] as [string, string, (v: string) => void][]
-                  ).map(([label, value, setter]) => (
-                    <div
-                      key={label}
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                      }}
-                    >
-                      <label style={{ color: C.textMuted, fontSize: 12 }}>
-                        {label}
-                      </label>
-                      <input
-                        type="text"
-                        value={value}
-                        onChange={(e) => setter(e.target.value)}
-                        style={inputStyle()}
-                      />
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    style={primaryBtn()}
-                    onClick={() => void handleSaveShortcuts()}
-                  >
-                    Salvar atalhos
-                  </button>
-                  {shortcutSaveStatus && (
-                    <span style={{ color: C.success, fontSize: 12 }}>
-                      {shortcutSaveStatus}
-                    </span>
-                  )}
-                  <p style={{ color: C.textMuted, fontSize: 11, margin: 0 }}>
-                    Nota: atalhos globais são registrados pelo sistema. Reinicie
-                    o app para aplicar mudanças.
-                  </p>
-                </div>
-              )}
-
-              {/* ── Logs tab ────────────────────────────────────────── */}
-              {settingsTab === "logs" && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 12,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 8,
-                      alignItems: "center",
-                    }}
-                  >
-                    <label style={{ color: C.textMuted, fontSize: 12 }}>
-                      Nível
-                    </label>
-                    <select
-                      value={logLevel}
-                      onChange={async (e) => {
-                        const next = e.target.value as LogLevel;
-                        setLogLevel(next);
-                        try {
-                          await window.desktopApi.setLogLevel({
-                            level: next,
-                          });
-                          await loadDiagnostics();
-                        } catch { /* silent */ }
-                      }}
-                      style={{ ...inputStyle(), width: "auto" }}
-                    >
-                      {(["debug", "info", "warn", "error"] as LogLevel[]).map(
-                        (l) => (
-                          <option key={l} value={l}>
-                            {l}
-                          </option>
-                        )
-                      )}
-                    </select>
-                    <button
-                      type="button"
-                      style={secondaryBtn()}
-                      onClick={() => void loadDiagnostics()}
-                    >
-                      Atualizar
-                    </button>
-                  </div>
-                  <div
-                    style={{
-                      background: C.bg,
-                      border: `1px solid ${C.border}`,
-                      borderRadius: 6,
-                      padding: 10,
-                      fontFamily: "monospace",
-                      fontSize: 11,
-                      color: C.textMuted,
-                      maxHeight: 260,
-                      overflowY: "auto",
-                      userSelect: "text",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-all",
-                    }}
-                  >
-                    {recentLogs.length === 0
-                      ? "Nenhum log disponível."
-                      : recentLogs.slice(-50).join("\n")}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </>
-  );
-}
-
-// ─── ResourceToggle sub-component ───────────────────────────────────────────
-
-function ResourceToggle({
-  label,
-  description,
-  value,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  value: boolean;
-  onChange: (v: boolean) => void;
-}): JSX.Element {
-  return (
-    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={value}
-        onClick={() => onChange(!value)}
-        style={{
-          flexShrink: 0,
-          marginTop: 2,
-          width: 36,
-          height: 20,
-          borderRadius: 10,
-          background: value ? C.accent : C.surface2,
-          border: `1px solid ${value ? C.accent : C.border}`,
-          cursor: "pointer",
-          position: "relative",
-          transition: "background 0.2s",
-          padding: 0,
-        }}
-      >
-        <span
-          style={{
-            position: "absolute",
-            top: 2,
-            left: value ? 18 : 2,
-            width: 14,
-            height: 14,
-            background: "#fff",
-            borderRadius: "50%",
-            transition: "left 0.2s",
-            display: "block",
-          }}
-        />
-      </button>
-      <div>
-        <div
-          style={{ fontWeight: 600, fontSize: 13, color: C.text }}
-        >
-          {label}
-        </div>
-        <div
-          style={{
-            fontSize: 11,
-            color: C.textMuted,
-            marginTop: 2,
-            lineHeight: 1.4,
-          }}
-        >
-          {description}
-        </div>
-      </div>
-    </div>
   );
 }

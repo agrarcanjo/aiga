@@ -17,6 +17,7 @@ function createWhisperCliManager(options) {
   const configuredPath = options?.binaryPath || process.env.WHISPER_CLI_PATH || "";
   const configuredModel = options?.modelPath || process.env.WHISPER_MODEL_PATH || "";
   const modelManager = options?.modelManager;
+  const settingsStore = options?.settingsStore;
   const defaultBinaryName = process.platform === "win32" ? "whisper-cli.exe" : "whisper-cli";
 
   let status = "idle";
@@ -39,15 +40,41 @@ function createWhisperCliManager(options) {
     }
 
     if (modelManager) {
-      const managedPath = modelManager.resolveModelPath("whisper");
-      if (managedPath) {
-        return managedPath;
+      const preferred = settingsStore?.getTranscriptionPacks?.()?.preferredModelTier;
+      if (preferred === "medium") {
+        const medium = modelManager.resolveModelPath("whisper-medium");
+        if (medium) {
+          return medium;
+        }
+      }
+      if (preferred === "small") {
+        const small = modelManager.resolveModelPath("whisper-small");
+        if (small) {
+          return small;
+        }
+      }
+      const base = modelManager.resolveModelPath("whisper");
+      if (base) {
+        return base;
+      }
+      const smallFallback = modelManager.resolveModelPath("whisper-small");
+      if (smallFallback) {
+        return smallFallback;
+      }
+      const mediumFallback = modelManager.resolveModelPath("whisper-medium");
+      if (mediumFallback) {
+        return mediumFallback;
       }
     }
 
     const localModel = path.join(app.getPath("userData"), "runtime", "models", "ggml-base.bin");
     if (fs.existsSync(localModel)) {
       return localModel;
+    }
+
+    const localSmall = path.join(app.getPath("userData"), "runtime", "models", "ggml-small.bin");
+    if (fs.existsSync(localSmall)) {
+      return localSmall;
     }
 
     return "";

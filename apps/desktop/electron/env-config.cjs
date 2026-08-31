@@ -43,6 +43,28 @@ function parseStealthHardening(value) {
   return undefined;
 }
 
+/** Catálogo de variáveis de ambiente reconhecidas no boot (G1). */
+const ENV_CATALOG = [
+  { envKey: "NODE_ENV", label: "Ambiente Node", field: "nodeEnv" },
+  { envKey: "DESKTOP_LOG_LEVEL", label: "Nível de log", field: "logLevel" },
+  { envKey: "GEMINI_MODEL", label: "Modelo Gemini (boot)", field: "geminiModel" },
+  { envKey: "FEATURE_PROVIDER_MODE", label: "Modo do provedor", field: "providerMode" },
+  {
+    envKey: "FEATURE_LOCAL_PROVIDER_ENABLED",
+    label: "Provedor local habilitado",
+    field: "localProviderEnabled"
+  },
+  { envKey: "FEATURE_FORCE_LOCAL_ONLY", label: "Somente local (privacidade)", field: "forceLocalOnly" },
+  { envKey: "FEATURE_STEALTH_HARDENING", label: "Stealth hardening", field: "stealthHardening" },
+  { envKey: "LLAMA_SERVER_PATH", label: "Caminho llama-server", field: "llamaServerPath" },
+  { envKey: "WHISPER_CLI_PATH", label: "Caminho whisper-cli", field: "whisperCliPath" }
+];
+
+function isEnvSet(envKey) {
+  const raw = process.env[envKey];
+  return raw !== undefined && String(raw).trim() !== "";
+}
+
 /**
  * Lê variáveis de ambiente relevantes para configuração do runtime.
  */
@@ -50,13 +72,45 @@ function getEnvironmentConfig() {
   return {
     nodeEnv: process.env.NODE_ENV || "development",
     logLevel: process.env.DESKTOP_LOG_LEVEL || "info",
+    geminiModel: process.env.GEMINI_MODEL || undefined,
     providerMode: parseProviderMode(process.env.FEATURE_PROVIDER_MODE),
     localProviderEnabled: parseBoolean(process.env.FEATURE_LOCAL_PROVIDER_ENABLED),
     forceLocalOnly: parseBoolean(process.env.FEATURE_FORCE_LOCAL_ONLY),
-    stealthHardening: parseStealthHardening(process.env.FEATURE_STEALTH_HARDENING)
+    stealthHardening: parseStealthHardening(process.env.FEATURE_STEALTH_HARDENING),
+    llamaServerPath: process.env.LLAMA_SERVER_PATH || undefined,
+    whisperCliPath: process.env.WHISPER_CLI_PATH || undefined
+  };
+}
+
+/**
+ * Relatório para UI: valores efetivos no boot + lista do que veio de env (somente leitura).
+ */
+function getEnvironmentReport() {
+  const env = getEnvironmentConfig();
+  const overrides = ENV_CATALOG.filter((entry) => isEnvSet(entry.envKey)).map((entry) => ({
+    envKey: entry.envKey,
+    label: entry.label,
+    field: entry.field,
+    value: String(process.env[entry.envKey]).trim()
+  }));
+
+  return {
+    env,
+    overrides,
+    catalog: ENV_CATALOG.map((entry) => ({
+      envKey: entry.envKey,
+      label: entry.label,
+      field: entry.field,
+      isSet: isEnvSet(entry.envKey)
+    }))
   };
 }
 
 module.exports = {
-  getEnvironmentConfig
+  ENV_CATALOG,
+  getEnvironmentConfig,
+  getEnvironmentReport,
+  parseBoolean,
+  parseProviderMode,
+  parseStealthHardening
 };

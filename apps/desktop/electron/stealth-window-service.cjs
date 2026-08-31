@@ -2,7 +2,7 @@
 
 /**
  * Cria serviço de perfil stealth para a janela principal.
- * Seguranca: aplica content protection para reduzir exposição em captura de tela quando habilitado.
+ * Suporta stealth visível (semi-transparente) e full stealth (janela oculta).
  */
 function createStealthWindowService(dependencies) {
   const logger = dependencies?.logger || {
@@ -17,8 +17,19 @@ function createStealthWindowService(dependencies) {
   }
 
   let isStealthEnabled = false;
+  let isFullStealthActive = false;
   let currentHardening = "safe";
   let currentOpacity = 0.8;
+
+  function buildState(appliedAtIso) {
+    return {
+      enabled: isStealthEnabled,
+      fullStealth: isFullStealthActive,
+      hardening: currentHardening,
+      opacity: currentOpacity,
+      appliedAtIso: appliedAtIso || new Date().toISOString()
+    };
+  }
 
   /**
    * Restaura o perfil padrão para operação normal.
@@ -41,7 +52,7 @@ function createStealthWindowService(dependencies) {
   }
 
   /**
-   * Aplica perfil stealth conforme nível de hardening.
+   * Aplica perfil stealth conforme nível de hardening (janela visível localmente).
    */
   function applyStealthProfile(windowRef, hardening, opacity) {
     const effectiveOpacity = typeof opacity === "number" ? opacity : currentOpacity;
@@ -58,6 +69,9 @@ function createStealthWindowService(dependencies) {
       windowRef.setIgnoreMouseEvents(false);
       windowRef.flashFrame(false);
       windowRef.setProgressBar(-1);
+      if (windowRef.isMinimized()) {
+        windowRef.restore();
+      }
       if (!windowRef.isVisible()) {
         windowRef.showInactive();
       }
@@ -71,13 +85,125 @@ function createStealthWindowService(dependencies) {
     windowRef.setIgnoreMouseEvents(true, { forward: true });
     windowRef.flashFrame(false);
     windowRef.setProgressBar(-1);
-    if (process.platform === "win32") {
-      windowRef.hide();
-      return;
+    if (windowRef.isMinimized()) {
+      windowRef.restore();
     }
     if (!windowRef.isVisible()) {
       windowRef.showInactive();
     }
+  }
+
+  /**
+   * Oculta completamente a janela mantendo o modo stealth lógico ativo.
+   */
+  function applyFullStealthProfile(windowRef) {
+    windowRef.setContentProtection(true);
+    windowRef.setSkipTaskbar(true);
+    windowRef.setAlwaysOnTop(false);
+    windowRef.setIgnoreMouseEvents(true, { forward: true });
+    windowRef.flashFrame(false);
+    windowRef.setProgressBar(-1);
+    windowRef.hide();
+  }
+
+  /**
+   * Traz a janela para frente de todas as outras (após sair do full stealth).
+   */
+  function bringWindowToFront(windowRef) {
+    if (!windowRef || windowRef.isDestroyed()) {
+      return;
+    }
+    if (windowRef.isMinimized()) {
+      windowRef.restore();
+    }
+    if (!windowRef.isVisible()) {
+      windowRef.show();
+    }
+    windowRef.moveTop();
+    windowRef.focus();
+  }
+
+  /**
+   * Sai do full stealth e reaplica stealth visível na tela local.
+   */
+  function exitFullStealth() {
+    if (!isFullStealthActive) {
+      return { changed: false, ...buildState() };
+    }
+
+    const windowRef = getMainWindow();
+    isFullStealthActive = false;
+
+    if (!windowRef || windowRef.isDestroyed()) {
+      return { changed: true, ...buildState() };
+    }
+
+    try {
+      if (isStealthEnabled) {
+        applyStealthProfile(windowRef, currentHardening, currentOpacity);
+      } else {
+        applyNormalProfile(windowRef);
+      }
+      bringWindowToFront(windowRef);
+      logger.debug("Exited full stealth — stealth visible restored");
+      return { changed: true, ...buildState() };
+    } catch (error) {
+      logger.error("Failed to exit full stealth", {
+        message: error instanceof Error ? error.message : String(error)
+      });
+      return { changed: true, ...buildState() };
+    }
+  }
+
+  /**
+   * Entra em full stealth (janela invisível). Ativa stealth se ainda não estiver.
+   */
+  function enterFullStealth(options) {
+    const hardening = options?.hardening || currentHardening || "safe";
+    const windowRef = getMainWindow();
+
+    if (!windowRef || windowRef.isDestroyed()) {
+      logger.warn("Full stealth requested but main window is unavailable");
+      return { changed: false, ...buildState() };
+    }
+
+    if (typeof options?.opacity === "number") {
+      currentOpacity = options.opacity;
+    }
+
+    if (!isStealthEnabled) {
+      isStealthEnabled = true;
+      currentHardening = hardening;
+    }
+
+    try {
+      isFullStealthActive = true;
+      applyFullStealthProfile(windowRef);
+      logger.info("Full stealth enabled — window hidden");
+      return { changed: true, ...buildState() };
+    } catch (error) {
+      logger.error("Failed to enter full stealth", {
+        message: error instanceof Error ? error.message : String(error)
+      });
+      return { changed: false, ...buildState() };
+    }
+  }
+
+  /**
+   * Alterna full stealth. Requer stealth conceitual ativo (ou ativa stealth antes).
+   */
+  function toggleFullStealthMode(options) {
+    if (isFullStealthActive) {
+      return exitFullStealth();
+    }
+    return enterFullStealth(options);
+  }
+
+  /**
+   * Usado antes de outros atalhos globais: restaura janela em modo stealth visível.
+   */
+  function exitFullStealthIfActive() {
+    return exitFullStealth();
   }
 
   /**
@@ -93,11 +219,7 @@ function createStealthWindowService(dependencies) {
         enabled,
         hardening
       });
-      return {
-        enabled: false,
-        hardening,
-        appliedAtIso: new Date().toISOString()
-      };
+      return buildState();
     }
 
     try {
@@ -105,23 +227,26 @@ function createStealthWindowService(dependencies) {
         if (typeof options?.opacity === "number") {
           currentOpacity = options.opacity;
         }
-        applyStealthProfile(windowRef, hardening, currentOpacity);
+        isStealthEnabled = true;
+        currentHardening = hardening;
+        if (isFullStealthActive) {
+          applyFullStealthProfile(windowRef);
+        } else {
+          applyStealthProfile(windowRef, hardening, currentOpacity);
+        }
       } else {
+        isStealthEnabled = false;
+        isFullStealthActive = false;
         applyNormalProfile(windowRef);
       }
 
-      isStealthEnabled = enabled;
-      currentHardening = hardening;
       logger.debug("Stealth profile updated", {
         enabled,
+        fullStealth: isFullStealthActive,
         hardening
       });
 
-      return {
-        enabled,
-        hardening,
-        appliedAtIso: new Date().toISOString()
-      };
+      return buildState();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown stealth failure";
       logger.error("Failed to apply stealth profile", {
@@ -129,40 +254,107 @@ function createStealthWindowService(dependencies) {
         hardening,
         message
       });
-      return {
-        enabled: isStealthEnabled,
-        hardening,
-        appliedAtIso: new Date().toISOString()
-      };
+      return buildState();
     }
   }
 
   /**
-   * Alterna stealth usando o hardening atual ou um override explícito.
+   * Alterna stealth visível (não alterna full stealth diretamente).
    */
   function toggleStealthMode(options) {
     const hardening = options?.hardening || currentHardening || "safe";
+
+    if (isFullStealthActive) {
+      isFullStealthActive = false;
+    }
+
     return setStealthMode({
       enabled: !isStealthEnabled,
-      hardening
+      hardening,
+      opacity: options?.opacity
     });
   }
 
-  /**
-   * Expõe snapshot do estado para sincronização com renderer e shortcuts.
-   */
   function getState() {
     return {
       enabled: isStealthEnabled,
+      fullStealth: isFullStealthActive,
       hardening: currentHardening,
       opacity: currentOpacity
     };
   }
 
+  /**
+   * Oculta a janela antes de captura de tela para nao incluir o app AIGA no print.
+   */
+  function hideForExternalCapture() {
+    const windowRef = getMainWindow();
+    if (!windowRef || windowRef.isDestroyed()) {
+      return null;
+    }
+
+    const snapshot = {
+      enabled: isStealthEnabled,
+      fullStealth: isFullStealthActive,
+      hardening: currentHardening,
+      opacity: currentOpacity
+    };
+
+    try {
+      windowRef.hide();
+      logger.debug("Window hidden for screenshot capture");
+    } catch (error) {
+      logger.warn("Failed to hide window for screenshot", {
+        message: error instanceof Error ? error.message : String(error)
+      });
+      return null;
+    }
+
+    return snapshot;
+  }
+
+  /**
+   * Restaura o perfil da janela apos captura de tela externa.
+   */
+  function restoreAfterExternalCapture(snapshot) {
+    if (!snapshot) {
+      return;
+    }
+
+    const windowRef = getMainWindow();
+    if (!windowRef || windowRef.isDestroyed()) {
+      return;
+    }
+
+    try {
+      if (snapshot.fullStealth) {
+        applyFullStealthProfile(windowRef);
+      } else if (snapshot.enabled) {
+        applyStealthProfile(windowRef, snapshot.hardening, snapshot.opacity);
+      } else {
+        applyNormalProfile(windowRef);
+      }
+      logger.debug("Window restored after screenshot capture", {
+        fullStealth: snapshot.fullStealth,
+        stealthEnabled: snapshot.enabled
+      });
+    } catch (error) {
+      logger.error("Failed to restore window after screenshot", {
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
   return {
     getState,
     setStealthMode,
-    toggleStealthMode
+    toggleStealthMode,
+    toggleFullStealthMode,
+    enterFullStealth,
+    exitFullStealth,
+    exitFullStealthIfActive,
+    hideForExternalCapture,
+    restoreAfterExternalCapture
   };
 }
 

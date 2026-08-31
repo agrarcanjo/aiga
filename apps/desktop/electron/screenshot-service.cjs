@@ -5,10 +5,72 @@ const { randomUUID } = require("node:crypto");
 const { app, desktopCapturer, screen } = require("electron");
 
 const MAX_QUEUE_LENGTH = 10;
+const CAPTURE_HIDE_SETTLE_MS = 150;
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function listDisplays() {
+  const primary = screen.getPrimaryDisplay();
+  return screen.getAllDisplays().map((display, index) => ({
+    id: String(display.id),
+    label: display.id === primary.id ? `Tela principal (${index + 1})` : `Tela ${index + 1}`,
+    bounds: display.bounds,
+    size: display.size,
+    scaleFactor: display.scaleFactor,
+    isPrimary: display.id === primary.id
+  }));
+}
+
+function resolveTargetDisplays(screenCapture) {
+  const displays = screen.getAllDisplays();
+  const primary = screen.getPrimaryDisplay();
+  const mode = screenCapture?.mode || "primary";
+
+  if (mode === "all_displays") {
+    return [...displays].sort((a, b) => {
+      if (a.bounds.x !== b.bounds.x) return a.bounds.x - b.bounds.x;
+      return a.bounds.y - b.bounds.y;
+    });
+  }
+
+  if (mode === "specific_display" && screenCapture?.displayId) {
+    const selected = displays.find((d) => String(d.id) === String(screenCapture.displayId));
+    if (selected) {
+      return [selected];
+    }
+  }
+
+  return [primary];
+}
+
+function findSourceForDisplay(sources, display) {
+  const byId = sources.find((source) => source.display_id === String(display.id));
+  if (byId) {
+    return byId;
+  }
+
+  // Fallback: match by label when display_id is empty (alguns builds Windows).
+  const labelHints = [
+    String(display.id),
+    `Display ${display.id}`,
+    `Screen ${display.id}`
+  ];
+  return (
+    sources.find((source) =>
+      labelHints.some((hint) => source.name.toLowerCase().includes(hint.toLowerCase()))
+    ) || null
+  );
+}
 
 function createScreenshotService(options) {
   const logger = options.logger;
   const onQueueUpdated = options.onQueueUpdated;
+  const stealthWindowService = options.stealthWindowService;
+  const settingsStore = options.settingsStore;
   const queue = [];
   const capturesDir = path.join(app.getPath("userData"), "captures");
 
@@ -22,43 +84,7 @@ function createScreenshotService(options) {
     onQueueUpdated([...queue]);
   }
 
-  async function captureScreenshot(payload = {}) {
-    ensureCapturesDir();
-
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const thumbnailSize = {
-      width: Math.max(1, primaryDisplay.size.width),
-      height: Math.max(1, primaryDisplay.size.height)
-    };
-
-    const sources = await desktopCapturer.getSources({
-      types: ["screen"],
-      thumbnailSize
-    });
-
-    const preferredSource =
-      sources.find((source) => source.display_id === String(primaryDisplay.id)) || sources[0];
-
-    if (!preferredSource) {
-      throw new Error("No screen source available for capture.");
-    }
-
-    const captureId = randomUUID();
-    const createdAtIso = new Date().toISOString();
-    const imagePath = path.join(capturesDir, `${captureId}.png`);
-    const pngBuffer = preferredSource.thumbnail.toPNG();
-
-    fs.writeFileSync(imagePath, pngBuffer);
-
-    const item = {
-      captureId,
-      imagePath,
-      createdAtIso,
-      source: payload.source || "full",
-      trigger: payload.trigger || "manual",
-      previewDataUrl: preferredSource.thumbnail.toDataURL()
-    };
-
+  function enqueueItem(item) {
     queue.unshift(item);
     while (queue.length > MAX_QUEUE_LENGTH) {
       const removed = queue.pop();
@@ -66,16 +92,114 @@ function createScreenshotService(options) {
         fs.rmSync(removed.imagePath, { force: true });
       }
     }
+  }
+
+  async function captureScreenshot(payload = {}) {
+    ensureCapturesDir();
+
+    const windowSnapshot =
+      typeof stealthWindowService?.hideForExternalCapture === "function"
+        ? stealthWindowService.hideForExternalCapture()
+        : null;
+
+    if (windowSnapshot) {
+      await delay(CAPTURE_HIDE_SETTLE_MS);
+    }
+
+    try {
+      return await performScreenCapture(payload);
+    } finally {
+      if (typeof stealthWindowService?.restoreAfterExternalCapture === "function") {
+        stealthWindowService.restoreAfterExternalCapture(windowSnapshot);
+      }
+    }
+  }
+
+  async function performScreenCapture(payload = {}) {
+    const screenCapture =
+      typeof settingsStore?.getScreenCapture === "function"
+        ? settingsStore.getScreenCapture()
+        : { mode: "primary", displayId: "" };
+
+    const targetDisplays = resolveTargetDisplays(screenCapture);
+    if (targetDisplays.length === 0) {
+      throw new Error("Nenhuma tela disponivel para captura.");
+    }
+
+    const maxWidth = Math.max(...targetDisplays.map((d) => Math.max(1, d.size.width)));
+    const maxHeight = Math.max(...targetDisplays.map((d) => Math.max(1, d.size.height)));
+
+    const sources = await desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: { width: maxWidth, height: maxHeight }
+    });
+
+    // Evita capturar a fonte virtual "Entire screen" quando houver telas individuais.
+    const individualSources = sources.filter((source) => Boolean(source.display_id));
+    const sourcePool = individualSources.length > 0 ? individualSources : sources;
+
+    const createdAtIso = new Date().toISOString();
+    const trigger = payload.trigger || "manual";
+    const sourceKind = payload.source || "full";
+    const capturedItems = [];
+
+    for (const display of targetDisplays) {
+      let preferredSource = findSourceForDisplay(sourcePool, display);
+
+      // Se ainda nao achou, tenta no pool completo (ultimo recurso).
+      if (!preferredSource) {
+        preferredSource = findSourceForDisplay(sources, display);
+      }
+
+      // Ultimo fallback: tela unica ou primeira fonte individual.
+      if (!preferredSource) {
+        preferredSource = sourcePool[0] || sources[0];
+      }
+
+      if (!preferredSource) {
+        continue;
+      }
+
+      const captureId = randomUUID();
+      const imagePath = path.join(capturesDir, `${captureId}.png`);
+      const pngBuffer = preferredSource.thumbnail.toPNG();
+      fs.writeFileSync(imagePath, pngBuffer);
+
+      const item = {
+        captureId,
+        imagePath,
+        createdAtIso,
+        source: sourceKind,
+        trigger,
+        previewDataUrl: preferredSource.thumbnail.toDataURL(),
+        displayId: String(display.id),
+        displayLabel: display.id === screen.getPrimaryDisplay().id ? "Tela principal" : `Tela ${display.id}`
+      };
+
+      enqueueItem(item);
+      capturedItems.push(item);
+    }
+
+    if (capturedItems.length === 0) {
+      throw new Error("No screen source available for capture.");
+    }
 
     logger.info("Screenshot captured", {
-      captureId: item.captureId,
-      trigger: item.trigger,
-      source: item.source,
+      captureId: capturedItems[0].captureId,
+      trigger,
+      source: sourceKind,
+      mode: screenCapture.mode,
+      displayCount: capturedItems.length,
       queueSize: queue.length
     });
 
     emitQueueUpdated();
-    return item;
+
+    // Mantém compatibilidade: retorno principal = primeira captura.
+    return {
+      ...capturedItems[0],
+      items: capturedItems
+    };
   }
 
   function getQueue() {
@@ -98,10 +222,13 @@ function createScreenshotService(options) {
   return {
     captureScreenshot,
     getQueue,
-    clearQueue
+    clearQueue,
+    listDisplays
   };
 }
 
 module.exports = {
-  createScreenshotService
+  createScreenshotService,
+  listDisplays,
+  resolveTargetDisplays
 };

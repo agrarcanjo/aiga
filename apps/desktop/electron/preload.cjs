@@ -5,6 +5,7 @@ const screenshotQueueUpdatedChannel = "screenshot:queue-updated";
 const screenshotQuickAnalyzeChannel = "screenshot:quick-analyze";
 const chatStreamEventChannel = "chat:stream-event";
 const stealthStateChangedChannel = "stealth:state-changed";
+const shortcutPushToTalkChannel = "shortcut:push-to-talk";
 const autoUpdateEventChannel = "auto-update:event";
 
 /**
@@ -17,6 +18,8 @@ contextBridge.exposeInMainWorld("desktopApi", {
   captureScreenshot: (payload) => ipcRenderer.invoke("screenshot:capture", payload),
   getScreenshotQueue: () => ipcRenderer.invoke("screenshot:queue:get"),
   clearScreenshotQueue: () => ipcRenderer.invoke("screenshot:queue:clear"),
+  listDisplays: () => ipcRenderer.invoke("screenshot:displays:list"),
+  saveScreenCapture: (payload) => ipcRenderer.invoke("screenshot:capture:save", payload),
   addAudio: (payload) => ipcRenderer.invoke("audio:add", payload),
   removeAudio: (payload) => ipcRenderer.invoke("audio:remove", payload),
   getPromptPresets: () => ipcRenderer.invoke("prompt:presets:get"),
@@ -30,6 +33,8 @@ contextBridge.exposeInMainWorld("desktopApi", {
   },
   transcribeAudioChunk: (payload) => ipcRenderer.invoke("audio:transcribe", payload),
   setStealthMode: (payload) => ipcRenderer.invoke("stealth:set-mode", payload),
+  toggleFullStealth: () => ipcRenderer.invoke("stealth:toggle-full"),
+  exitFullStealth: () => ipcRenderer.invoke("stealth:exit-full"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (payload) => ipcRenderer.invoke("settings:save", payload),
   resetSettings: () => ipcRenderer.invoke("settings:reset"),
@@ -67,6 +72,13 @@ contextBridge.exposeInMainWorld("desktopApi", {
       ipcRenderer.removeListener(stealthStateChangedChannel, wrappedListener);
     };
   },
+  onPushToTalkShortcut: (listener) => {
+    const wrappedListener = (_event, payload) => listener(payload);
+    ipcRenderer.on(shortcutPushToTalkChannel, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(shortcutPushToTalkChannel, wrappedListener);
+    };
+  },
   onAutoUpdateEvent: (listener) => {
     const wrappedListener = (_event, payload) => listener(payload);
     ipcRenderer.on(autoUpdateEventChannel, wrappedListener);
@@ -76,5 +88,121 @@ contextBridge.exposeInMainWorld("desktopApi", {
   },
   quitApp: () => ipcRenderer.invoke("app:quit"),
   minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
-  setWindowOpacity: (opacity) => ipcRenderer.invoke("window:set-opacity", { opacity })
+  setWindowOpacity: (opacity) => ipcRenderer.invoke("window:set-opacity", { opacity }),
+  setWindowLayout: (layout) => ipcRenderer.invoke("window:set-layout", { layout }),
+  listAudioSources: () => ipcRenderer.invoke("audio:sources:list"),
+  getDesktopLoopbackSource: () => ipcRenderer.invoke("audio:loopback:desktop-source"),
+  testAudioSource: (payload) => ipcRenderer.invoke("audio:source:test", payload),
+  saveAudioCapture: (payload) => ipcRenderer.invoke("audio:capture:save", payload),
+  getFfmpegStatus: () => ipcRenderer.invoke("audio:ffmpeg:status"),
+  installFfmpeg: (payload) => ipcRenderer.invoke("audio:ffmpeg:install", payload || {}),
+  onFfmpegInstallProgress: (listener) => {
+    const channel = "audio:ffmpeg:progress";
+    const wrappedListener = (_event, payload) => listener(payload);
+    ipcRenderer.on(channel, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(channel, wrappedListener);
+    };
+  },
+  onAudioCaptureLevel: (listener) => {
+    const channel = "audio:capture:level";
+    const wrappedListener = (_event, payload) => listener(payload);
+    ipcRenderer.on(channel, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(channel, wrappedListener);
+    };
+  },
+  reportAudioCaptureLevel: (payload) => ipcRenderer.invoke("audio:capture:level:report", payload || {}),
+  startAudioCaptureMeter: (payload) => ipcRenderer.invoke("audio:capture:meter:start", payload || {}),
+  stopAudioCaptureMeter: () => ipcRenderer.invoke("audio:capture:meter:stop"),
+  getAudioRecordingsDefaults: () => ipcRenderer.invoke("audio:recordings:defaults"),
+  pickAudioRecordingsFolder: () => ipcRenderer.invoke("audio:recordings:pick-folder"),
+  saveMeetingAudioChunk: (payload) => ipcRenderer.invoke("audio:recordings:save-chunk", payload),
+  listTranscriptionPacks: () => ipcRenderer.invoke("transcription:packs:list"),
+  installTranscriptionPack: (payload) => ipcRenderer.invoke("transcription:packs:install", payload),
+  uninstallTranscriptionPack: (payload) => ipcRenderer.invoke("transcription:packs:uninstall", payload),
+  installRequiredTranscriptionPacks: () => ipcRenderer.invoke("transcription:packs:install-required"),
+  setupTranscriptionRuntime: (payload) => ipcRenderer.invoke("transcription:packs:setup", payload),
+  setTranscriptionModelTier: (payload) => ipcRenderer.invoke("transcription:packs:set-tier", payload),
+  uninstallTranscriptionModel: (payload) =>
+    ipcRenderer.invoke("transcription:packs:uninstall-model", payload),
+  getSetupChecklist: () => ipcRenderer.invoke("setup:checklist"),
+  onTranscriptionPacksProgress: (listener) => {
+    const channel = "transcription:packs:progress";
+    const wrappedListener = (_event, payload) => listener(payload);
+    ipcRenderer.on(channel, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(channel, wrappedListener);
+    };
+  },
+  getLlmSettings: () => ipcRenderer.invoke("llm:settings:get"),
+  saveLlmSettings: (payload) => ipcRenderer.invoke("llm:settings:save", payload),
+  testLlmProvider: (payload) => ipcRenderer.invoke("llm:providers:test", payload),
+  getTokenUsageSession: (sessionId) => ipcRenderer.invoke("usage:tokens:session", { sessionId }),
+  getTokenUsageDaily: () => ipcRenderer.invoke("usage:tokens:daily"),
+  listMeetingTemplates: () => ipcRenderer.invoke("meeting:templates:list"),
+  getMeetingConsentText: () => ipcRenderer.invoke("meeting:consent:get"),
+  listConsentAudit: (limit) => ipcRenderer.invoke("meeting:consent:list", { limit }),
+  runRetentionPurge: () => ipcRenderer.invoke("privacy:retention:purge"),
+  startMeetingSession: (payload) => ipcRenderer.invoke("meeting:session:start", payload),
+  requestMeetingMidSummary: (payload) =>
+    ipcRenderer.invoke("meeting:session:mid-summary", payload),
+  addMeetingBookmark: (payload) => ipcRenderer.invoke("meeting:transcript:bookmark", payload),
+  stopMeetingSession: (payload) => ipcRenderer.invoke("meeting:session:stop", payload),
+  cancelMeetingSession: (payload) => ipcRenderer.invoke("meeting:session:cancel", payload),
+  appendMeetingTranscript: (payload) => ipcRenderer.invoke("meeting:transcript:append", payload),
+  listContextProfiles: () => ipcRenderer.invoke("context:profiles:list"),
+  saveContextProfile: (payload) => ipcRenderer.invoke("context:profiles:save", payload),
+  deleteContextProfile: (payload) => ipcRenderer.invoke("context:profiles:delete", payload),
+  duplicateContextProfile: (payload) => ipcRenderer.invoke("context:profiles:duplicate", payload),
+  updateTeamMemoryItem: (payload) => ipcRenderer.invoke("context:team-memory:update", payload),
+  onMeetingSessionStatus: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("meeting:session:status", wrapped);
+    return () => ipcRenderer.removeListener("meeting:session:status", wrapped);
+  },
+  onMeetingSessionCompleted: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("meeting:session:completed", wrapped);
+    return () => ipcRenderer.removeListener("meeting:session:completed", wrapped);
+  },
+  onMeetingTranscriptDelta: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("meeting:transcript:delta", wrapped);
+    return () => ipcRenderer.removeListener("meeting:transcript:delta", wrapped);
+  },
+  onMeetingMidSummary: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("meeting:mid-summary", wrapped);
+    return () => ipcRenderer.removeListener("meeting:mid-summary", wrapped);
+  },
+  onMeetingTranscriptBookmark: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("meeting:transcript:bookmark", wrapped);
+    return () => ipcRenderer.removeListener("meeting:transcript:bookmark", wrapped);
+  },
+  onTokenUsageThreshold: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("usage:tokens:threshold", wrapped);
+    return () => ipcRenderer.removeListener("usage:tokens:threshold", wrapped);
+  },
+  onMeetingActiveAlert: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("meeting:active:alert", wrapped);
+    return () => ipcRenderer.removeListener("meeting:active:alert", wrapped);
+  },
+  dismissMeetingActiveAlert: (payload) =>
+    ipcRenderer.invoke("meeting:active:dismiss", payload),
+  listTeamMemory: () => ipcRenderer.invoke("context:team-memory:list"),
+  deleteTeamMemoryItem: (payload) => ipcRenderer.invoke("context:team-memory:delete", payload),
+  getTranslationConsentText: () => ipcRenderer.invoke("translation:consent:get"),
+  startTranslationSession: (payload) => ipcRenderer.invoke("translation:session:start", payload),
+  stopTranslationSession: () => ipcRenderer.invoke("translation:session:stop"),
+  getTranslationSessionStatus: () => ipcRenderer.invoke("translation:session:status"),
+  ingestTranslationMicChunk: (payload) => ipcRenderer.invoke("translation:chunk:ingest", payload),
+  onTranslationLine: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("translation:line", wrapped);
+    return () => ipcRenderer.removeListener("translation:line", wrapped);
+  }
 });

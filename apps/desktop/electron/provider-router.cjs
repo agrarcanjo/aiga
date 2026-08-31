@@ -8,11 +8,12 @@ function createProviderRouter(dependencies) {
     info: () => {},
     warn: () => {}
   };
+  const llmProviderRegistry = dependencies?.llmProviderRegistry;
   const geminiProvider = dependencies?.geminiProvider;
   const localProvider = dependencies?.localProvider;
 
-  if (!geminiProvider || !localProvider) {
-    throw new Error("ProviderRouter requires geminiProvider and localProvider.");
+  if (!llmProviderRegistry && (!geminiProvider || !localProvider)) {
+    throw new Error("ProviderRouter requires llmProviderRegistry or legacy providers.");
   }
 
   function resolveStrategy(effectiveFlags, hasApiKey) {
@@ -63,10 +64,21 @@ function createProviderRouter(dependencies) {
     }
 
     if (strategy === "cloud-only") {
-      if (!hasApiKey) {
+      if (!hasApiKey && llmProviderRegistry) {
+        const route = llmProviderRegistry.resolveRoute("ask");
+        if (route.providerId !== "local") {
+          const key = input.apiKey || "";
+          if (!key) {
+            throw new Error("API key do provedor de IA nao configurada nas Settings.");
+          }
+        }
+      } else if (!hasApiKey) {
         throw new Error("Gemini API key nao configurada nas Settings.");
       }
 
+      if (llmProviderRegistry) {
+        return llmProviderRegistry.streamAskResponse(input);
+      }
       return geminiProvider.streamAskResponse(input);
     }
 
@@ -82,6 +94,9 @@ function createProviderRouter(dependencies) {
         throw error;
       }
 
+      if (llmProviderRegistry) {
+        return llmProviderRegistry.streamAskResponse(input);
+      }
       return geminiProvider.streamAskResponse(input);
     }
   }

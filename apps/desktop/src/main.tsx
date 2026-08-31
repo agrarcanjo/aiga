@@ -2,6 +2,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { TranslationOverlayView } from "./TranslationOverlayView";
 import "./global.css";
 
 const rootElement = document.getElementById("root");
@@ -10,8 +11,9 @@ if (!rootElement) {
   throw new Error("Elemento root nao encontrado para inicializar a aplicacao.");
 }
 
+const isOverlay =
+  new URLSearchParams(globalThis.location.search).get("view") === "translation-overlay";
+
 createRoot(rootElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
+  <React.StrictMode>{isOverlay ? <TranslationOverlayView /> : <App />}</React.StrictMode>
 );

@@ -113,7 +113,8 @@ Bootstrap inicial do monorepo para o MVP desktop.
 - Executar o self-check de stealth no app antes de iniciar compartilhamento.
 - Em Windows, validar previamente:
 	- permissao de microfone
-	- atalho `Ctrl+B`
+	- atalho full stealth (`Ctrl+Shift+H`, configurável)
+	- modo não-stealth (opcional em Configurações → Geral)
 	- modo de compartilhamento escolhido (janela/monitor secundario preferidos)
 - Se o ambiente exigir discricao maxima, usar `stealthHardening=strict` e validar manualmente o cenario real em Zoom/Meet/Teams.
 
@@ -165,17 +166,35 @@ Bootstrap inicial do monorepo para o MVP desktop.
 	- `allowPrerelease`
 - Limitacao intencional: em ambiente dev/unpackaged o fluxo fica indisponivel; a validacao real exige build instalada.
 
-## Feature flags e env management
+## Feature flags e ambiente
 
-- O app expoe gerenciamento de flags em runtime pelo painel Feature flags e ambiente.
-- As flags persistidas podem ser sobrescritas por variaveis de ambiente no boot.
-- Arquivo de referencia: .env.example
+- **Configuracoes → Ambiente:** flags efetivas, badge `definido por ambiente` quando o boot sobrescreve o arquivo, e catalogo de variaveis.
+- As flags persistidas em `settings.json` podem ser sobrescritas por variaveis de ambiente **apenas no boot** (reinicie apos alterar `.env`).
+- Arquivo de referencia: [.env.example](.env.example)
 
-Variaveis suportadas:
-- FEATURE_PROVIDER_MODE: cloud | local | hybrid
-- FEATURE_LOCAL_PROVIDER_ENABLED: true | false
-- FEATURE_FORCE_LOCAL_ONLY: true | false
-- FEATURE_STEALTH_HARDENING: off | safe | strict
+Variaveis principais:
+- `DESKTOP_LOG_LEVEL`: debug | info | warn | error
+- `GEMINI_MODEL`: modelo cloud no boot (ex.: gemini-2.5-flash)
+- `FEATURE_PROVIDER_MODE`: cloud | local | hybrid
+- `FEATURE_LOCAL_PROVIDER_ENABLED`: true | false
+- `FEATURE_FORCE_LOCAL_ONLY`: true | false
+- `FEATURE_STEALTH_HARDENING`: off | safe | strict (inclui overlay de traducao)
+
+## Modo reuniao (G2/G3)
+
+- Atalho no header: icone **👥** (Modo reuniao).
+- Modos: **Observador** (resumo ao encerrar), **Ativo** (alertas de pergunta), **Hibrido** (ambos).
+- Pre-teste de audio (microfone ou loopback) antes de iniciar.
+- Durante gravacao: barra GRAVANDO; em stealth, **bandeja do sistema** com cronometro e menu Encerrar/Cancelar.
+- **Configuracoes → Reuniao:** roteamento LLM (resumo, classificador ativo, traducao), memoria do time, apelidos padrao.
+- Perfis de contexto: `context-store` (JSON em userData).
+
+## Traducao ao vivo (G4)
+
+- Atalho no header: icone **🌐**.
+- Fluxo: captura (mic ou loopback WASAPI) → STT → traducao (`llmRouting.translation` ou LLM local).
+- Overlay flutuante always-on-top (opcional em Configuracoes / painel de traducao); respeita `FEATURE_STEALTH_HARDENING` (content protection).
+- Nao iniciar traducao e reuniao ao mesmo tempo (exclusao mutua no main process).
 
 ## Captura de screenshots
 
