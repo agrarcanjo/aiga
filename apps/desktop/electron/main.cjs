@@ -187,14 +187,14 @@ app.whenReady().then(() => {
     emitLevel: (payload) => emitToAllWindows("audio:capture:level", payload)
   });
   void ffmpegInstaller.getStatus().then((st) => {
-    if (!st.available || st.wasapiSupported === false) {
-      logger.warn("ffmpeg WASAPI not ready — loopback/translation will fail until reinstall", {
+    if (!st.available) {
+      logger.warn("ffmpeg not ready — transcricao local pode falhar ate instalar", {
         path: st.path,
         lastError: st.lastError
       });
       return;
     }
-    logger.info("ffmpeg ready", { path: st.path, wasapiSupported: st.wasapiSupported });
+    logger.info("ffmpeg ready", { path: st.path });
   });
   const whisperCliInstaller = createWhisperCliInstaller({ logger });
   const transcriptionPacksService = createTranscriptionPacksService({

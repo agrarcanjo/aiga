@@ -1,9 +1,5 @@
-// G4 — continuous translation: loopback/mic chunks → STT → LLM translate → events
-const { spawn } = require("node:child_process");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const { resolveFfmpegPath } = require("./audio-source-enumerator.cjs");
+// G4 — continuous translation: chunks de áudio do renderer → STT → LLM translate → events
+// A captura (mic ou saída do sistema) acontece no renderer; o main só processa os chunks.
 
 const LANG_LABELS = {
   auto: "idioma detectado",
@@ -38,78 +34,11 @@ function createTranslationSession(dependencies) {
   const localProvider = dependencies.localProvider;
   const translationOverlayWindow = dependencies.translationOverlayWindow;
   const consentAuditStore = dependencies.consentAuditStore;
-  const meetingAudioArchive = dependencies.meetingAudioArchive;
   const transcriptionPacksService = dependencies.transcriptionPacksService;
   const audioCaptureMeter = dependencies.audioCaptureMeter;
 
   let session = null;
-  let chunkTimer = null;
   let recording = false;
-
-  function buildWasapiInput(deviceId) {
-    return deviceId && deviceId !== "default" ? `audio=${deviceId}` : "audio=default";
-  }
-
-  async function recordLoopbackChunk(deviceId) {
-    const ffmpeg = resolveFfmpegPath();
-    const tempPath = path.join(os.tmpdir(), `aiga-trans-${Date.now()}.wav`);
-    const durationSec = 6;
-
-    return new Promise((resolve) => {
-      const proc = spawn(
-        ffmpeg,
-        [
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          "-f",
-          "wasapi",
-          "-i",
-          buildWasapiInput(deviceId),
-          "-t",
-          String(durationSec),
-          "-ac",
-          "1",
-          "-ar",
-          "16000",
-          "-y",
-          tempPath
-        ],
-        { windowsHide: true }
-      );
-
-      proc.on("close", async (code) => {
-        if (code !== 0 || !fs.existsSync(tempPath)) {
-          resolve(null);
-          return;
-        }
-        try {
-          const buffer = fs.readFileSync(tempPath);
-          try {
-            fs.unlinkSync(tempPath);
-          } catch {
-            // ignore
-          }
-          if (buffer.length < 800) {
-            resolve(null);
-            return;
-          }
-          if (session && meetingAudioArchive?.saveChunk) {
-            meetingAudioArchive.saveChunk({
-              sessionId: session.id,
-              kind: "translation",
-              extension: "wav",
-              buffer
-            });
-          }
-          resolve(buffer.toString("base64"));
-        } catch {
-          resolve(null);
-        }
-      });
-      proc.on("error", () => resolve(null));
-    });
-  }
 
   async function collectLlmText(input) {
     let fullText = "";
@@ -249,21 +178,6 @@ function createTranslationSession(dependencies) {
     }
   }
 
-  async function loopbackTick() {
-    if (!session || !recording) {
-      return;
-    }
-    const profile = session.audioProfile;
-    if (profile.mode === "microphone") {
-      return;
-    }
-    const chunk = await recordLoopbackChunk(profile.deviceId || "default");
-    if (chunk) {
-      const sttLang = session.sourceLanguage === "auto" ? "auto" : session.sourceLanguage;
-      await processChunk(chunk, sttLang);
-    }
-  }
-
   function start(payload) {
     if (session) {
       throw new Error("Sessao de traducao ja ativa.");
@@ -326,8 +240,7 @@ function createTranslationSession(dependencies) {
       translationOverlayWindow.show();
     }
 
-    // Áudio (mic ou loopback) chega do renderer via ingestMicChunk.
-    // FFmpeg não possui demuxer WASAPI no upstream — não usar loopbackTick.
+    // Áudio (mic ou saída do sistema) chega do renderer via ingestMicChunk.
 
     logger.info("Translation session started", {
       sessionId: session.id,
@@ -345,10 +258,6 @@ function createTranslationSession(dependencies) {
 
   function stop() {
     recording = false;
-    if (chunkTimer) {
-      clearInterval(chunkTimer);
-      chunkTimer = null;
-    }
     if (audioCaptureMeter?.stop) {
       audioCaptureMeter.stop();
     }
@@ -385,7 +294,7 @@ function createTranslationSession(dependencies) {
     };
   }
 
-  /** Renderer envia chunks de microfone */
+  /** Renderer envia chunks de áudio (microfone ou saída do sistema) */
   async function ingestMicChunk(chunkBase64) {
     if (!session || !recording) {
       return { ok: false };

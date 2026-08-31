@@ -4,7 +4,6 @@ function createSetupChecklistService(options) {
   const settingsStore = options.settingsStore;
   const transcriptionPacksService = options.transcriptionPacksService;
   const ffmpegInstaller = options.ffmpegInstaller;
-  const audioSourceEnumerator = options.audioSourceEnumerator;
 
   async function getChecklist() {
     const settings = settingsStore.getPublicSettings();
@@ -19,9 +18,6 @@ function createSetupChecklistService(options) {
       if (ffmpegInstaller?.getStatus) {
         const st = await ffmpegInstaller.getStatus();
         ffmpegAvailable = Boolean(st.available);
-      } else if (audioSourceEnumerator?.listSources) {
-        const sources = await audioSourceEnumerator.listSources();
-        ffmpegAvailable = sources.ffmpegAvailable !== false;
       }
     } catch {
       ffmpegAvailable = false;
@@ -34,14 +30,8 @@ function createSetupChecklistService(options) {
       Boolean(settings.hasGeminiApiKey);
 
     const audioMode = settings.audioCapture?.mode || "system_loopback";
-    const audioDeviceId = settings.audioCapture?.deviceId || "";
-    const needsFfmpeg = audioMode !== "microphone";
     const hasMic =
       Boolean(settings.selectedAudioInputDeviceId) || Boolean(settings.selectedAudioInputDeviceLabel);
-    const outputDeviceConfigured =
-      audioMode === "microphone" ||
-      audioMode === "system_loopback" ||
-      (audioMode === "output_device" && Boolean(audioDeviceId && audioDeviceId !== ""));
 
     const items = [
       {
@@ -68,19 +58,19 @@ function createSetupChecklistService(options) {
         tab: "audio",
         title: "Captura de áudio (saída do sistema)",
         description:
-          "Para tradução/reunião, use “Saída do sistema” (padrão) ou escolha um dispositivo de saída específico.",
+          "Para tradução/reunião, use “Saída do sistema” (padrão) — captura pelo próprio Electron, sem ffmpeg.",
         severity: "required",
-        ready: outputDeviceConfigured && (audioMode === "microphone" || ffmpegAvailable),
+        ready: audioMode === "microphone" || process.platform === "win32",
         actionLabel: "Abrir Captura áudio"
       },
       {
         id: "ffmpeg",
         tab: "audio",
-        title: "ffmpeg (captura de saída do sistema)",
-        description: "Necessário para loopback/Teams. Pode ser instalado automaticamente.",
-        severity: needsFfmpeg ? "required" : "recommended",
+        title: "ffmpeg (conversão de áudio para transcrição local)",
+        description: "Usado pelo STT local. Pode ser instalado automaticamente.",
+        severity: "recommended",
         ready: ffmpegAvailable,
-        actionLabel: "Abrir Captura áudio"
+        actionLabel: "Abrir Tradução"
       },
       {
         id: "microphone",

@@ -404,7 +404,6 @@ export interface TranscriptionPacksProgressEvent {
 
 export interface FfmpegStatusResponse {
   available: boolean;
-  wasapiSupported?: boolean;
   path: string;
   managedPath: string;
   installState: "idle" | "downloading" | "extracting" | "ready" | "failed";
@@ -755,8 +754,8 @@ export interface DesktopApi {
   listAudioSources(): Promise<{
     modes: string[];
     outputs: { id: string; label: string }[];
-    ffmpegAvailable?: boolean;
     platformSupported?: boolean;
+    loopbackProvider?: string;
     error?: string;
     defaultOutputId?: string;
   }>;

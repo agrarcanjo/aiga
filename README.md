@@ -184,7 +184,7 @@ Variaveis principais:
 
 - Atalho no header: icone **👥** (Modo reuniao).
 - Modos: **Observador** (resumo ao encerrar), **Ativo** (alertas de pergunta), **Hibrido** (ambos).
-- Pre-teste de audio (microfone ou loopback) antes de iniciar.
+- Pre-teste de audio (microfone ou saida do sistema) antes de iniciar; o teste mede o pico real em dBFS.
 - Durante gravacao: barra GRAVANDO; em stealth, **bandeja do sistema** com cronometro e menu Encerrar/Cancelar.
 - **Configuracoes → Reuniao:** roteamento LLM (resumo, classificador ativo, traducao), memoria do time, apelidos padrao.
 - Perfis de contexto: `context-store` (JSON em userData).
@@ -192,7 +192,7 @@ Variaveis principais:
 ## Traducao ao vivo (G4)
 
 - Atalho no header: icone **🌐**.
-- Fluxo: captura (mic ou loopback WASAPI) → STT → traducao (`llmRouting.translation` ou LLM local).
+- Fluxo: captura (mic ou saida do sistema via `desktopCapturer` do Electron) → STT → traducao (`llmRouting.translation` ou LLM local).
 - Overlay flutuante always-on-top (opcional em Configuracoes / painel de traducao); respeita `FEATURE_STEALTH_HARDENING` (content protection).
 - Nao iniciar traducao e reuniao ao mesmo tempo (exclusao mutua no main process).
 

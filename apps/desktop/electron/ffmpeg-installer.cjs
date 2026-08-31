@@ -6,13 +6,11 @@ const http = require("node:http");
 const { spawn } = require("node:child_process");
 const { app } = require("electron");
 
-// essentials (gyan) NÃO inclui WASAPI — necessário para captura de saída no Windows.
+// ffmpeg é usado para conversão de áudio (STT local). A captura da saída do sistema
+// não depende dele — usa o desktopCapturer do Electron.
 const DEFAULT_DOWNLOAD_URL =
   process.env.FFMPEG_DOWNLOAD_URL ||
   "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
-
-const WASAPI_MISSING_HINT =
-  "ffmpeg sem suporte WASAPI (build essentials ou incompleto). Reinstale o ffmpeg completo em Configurações → Captura áudio.";
 
 function ensureDirectory(dirPath) {
   if (!fs.existsSync(dirPath)) {
@@ -56,96 +54,50 @@ function spawnFfmpeg(ffmpegPath, args) {
   });
 }
 
-async function probeWasapiSupport(ffmpegPath) {
-  if (process.platform !== "win32") {
-    return { supported: true, detail: "non-windows" };
-  }
-
-  const formats = await spawnFfmpeg(ffmpegPath, ["-hide_banner", "-demuxers"]);
-  const text = `${formats.stdout}\n${formats.stderr}`;
-  if (/\bwasapi\b/i.test(text)) {
-    return { supported: true, detail: "demuxer-list" };
-  }
-
-  // Fallback: tentativa real — essentials responde "Unknown input format: 'wasapi'".
-  const tryOpen = await spawnFfmpeg(ffmpegPath, [
-    "-hide_banner",
-    "-f",
-    "wasapi",
-    "-list_devices",
-    "true",
-    "-i",
-    "dummy"
-  ]);
-  const tryText = `${tryOpen.stdout}\n${tryOpen.stderr}`;
-  if (/unknown input format\s*['"]?wasapi/i.test(tryText)) {
-    return { supported: false, detail: tryText.trim().slice(0, 300) };
-  }
-  if (/\bwasapi\b/i.test(tryText) || /WASAPI devices/i.test(tryText)) {
-    return { supported: true, detail: "list-devices" };
-  }
-  return { supported: false, detail: tryText.trim().slice(0, 300) || "wasapi ausente" };
-}
-
 async function detectFfmpegAt(ffmpegPath) {
   const version = await spawnFfmpeg(ffmpegPath, ["-version"]);
   if (!version.ok) {
     return {
       available: false,
-      wasapiSupported: false,
       path: ffmpegPath,
       versionOk: false,
-      wasapiDetail: version.error || version.stderr.slice(0, 200)
+      detail: version.error || version.stderr.slice(0, 200)
     };
   }
 
-  const wasapi = await probeWasapiSupport(ffmpegPath);
-  const loopbackReady = process.platform !== "win32" || wasapi.supported;
   return {
-    available: loopbackReady,
-    wasapiSupported: wasapi.supported,
+    available: true,
     path: ffmpegPath,
     versionOk: true,
-    wasapiDetail: wasapi.detail
+    detail: "version-ok"
   };
 }
 
-/**
- * Prefere binário com WASAPI (managed/env) em vez de um ffmpeg do PATH incompleto.
- */
 async function resolveBestFfmpeg() {
-  let fallback = null;
   for (const candidate of candidatePaths()) {
     const exists =
       candidate === "ffmpeg" ||
       candidate === "ffmpeg.exe" ||
       fs.existsSync(candidate);
-    if (!exists && candidate !== "ffmpeg" && candidate !== "ffmpeg.exe") {
+    if (!exists) {
       continue;
     }
     const detected = await detectFfmpegAt(candidate);
     if (!detected.versionOk) {
       continue;
     }
-    if (!fallback) {
-      fallback = detected;
+    if (detected.path && fs.existsSync(detected.path)) {
+      process.env.FFMPEG_PATH = detected.path;
     }
-    if (detected.wasapiSupported || process.platform !== "win32") {
-      if (detected.path && fs.existsSync(detected.path)) {
-        process.env.FFMPEG_PATH = detected.path;
-      }
-      return detected;
-    }
+    return detected;
   }
-  return (
-    fallback || {
-      available: false,
-      wasapiSupported: false,
-      path: getManagedFfmpegPath(),
-      versionOk: false,
-      wasapiDetail: "ffmpeg nao encontrado"
-    }
-  );
+
+  return {
+    available: false,
+    path: getManagedFfmpegPath(),
+    versionOk: false,
+    detail: "ffmpeg nao encontrado"
+  };
 }
 
 function resolveFfmpegPath() {
@@ -308,12 +260,8 @@ function createFfmpegInstaller(options) {
 
   async function getStatus() {
     const detected = await detectFfmpeg();
-    if (detected.versionOk && !detected.wasapiSupported && process.platform === "win32") {
-      lastError = lastError || WASAPI_MISSING_HINT;
-    }
     return {
       available: detected.available,
-      wasapiSupported: Boolean(detected.wasapiSupported),
       path: detected.path,
       managedPath: getManagedFfmpegPath(),
       installState,
@@ -344,19 +292,13 @@ function createFfmpegInstaller(options) {
     }
 
     const existing = await detectFfmpeg();
-    if (existing.available && existing.wasapiSupported && !force) {
+    if (existing.available && !force) {
       installState = "ready";
       lastError = "";
       progressPercent = 100;
-      progressMessage = "ffmpeg já pronto (WASAPI OK).";
+      progressMessage = "ffmpeg já pronto.";
       pushProgress({ installState, message: progressMessage, percent: 100 });
       return getStatus();
-    }
-
-    if (existing.versionOk && !existing.wasapiSupported) {
-      logger.warn("ffmpeg found without WASAPI — reinstalling full build", {
-        path: existing.path
-      });
     }
 
     installState = "downloading";
@@ -396,7 +338,7 @@ function createFfmpegInstaller(options) {
         throw new Error("ffmpeg.exe nao encontrado no pacote baixado.");
       }
 
-      progressMessage = "Validando demuxer WASAPI…";
+      progressMessage = "Validando binário ffmpeg…";
       pushProgress({ installState: "extracting", message: progressMessage, percent: 99 });
 
       const destination = getManagedFfmpegPath();
@@ -407,19 +349,14 @@ function createFfmpegInstaller(options) {
       if (!verified.versionOk) {
         throw new Error("ffmpeg instalado mas nao respondeu ao teste de versao.");
       }
-      if (!verified.wasapiSupported) {
-        throw new Error(
-          "ffmpeg instalado sem demuxer WASAPI. Use um build full (BtbN/gpl) ou defina FFMPEG_DOWNLOAD_URL."
-        );
-      }
 
       installState = "ready";
       lastInstalledAtIso = new Date().toISOString();
       lastError = "";
       progressPercent = 100;
-      progressMessage = "ffmpeg completo instalado (WASAPI OK).";
+      progressMessage = "ffmpeg instalado com sucesso.";
       pushProgress({ installState, message: progressMessage, percent: 100 });
-      logger.info("ffmpeg install: ready with WASAPI", { path: destination });
+      logger.info("ffmpeg install: ready", { path: destination });
       return getStatus();
     } catch (error) {
       installState = "failed";
@@ -441,8 +378,7 @@ function createFfmpegInstaller(options) {
     resolveFfmpegPath,
     detectFfmpeg,
     getStatus,
-    installPortable,
-    WASAPI_MISSING_HINT
+    installPortable
   };
 }
 
@@ -450,7 +386,5 @@ module.exports = {
   createFfmpegInstaller,
   resolveFfmpegPath,
   detectFfmpeg,
-  getManagedFfmpegPath,
-  probeWasapiSupport,
-  WASAPI_MISSING_HINT
+  getManagedFfmpegPath
 };

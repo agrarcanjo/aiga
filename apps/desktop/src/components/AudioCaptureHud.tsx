@@ -135,11 +135,12 @@ export function AudioCaptureHud({ level, compact = false }: AudioCaptureHudProps
 }
 
 /**
- * Mede nível do MediaStream (microfone) via Web Audio API.
+ * Mede nível do MediaStream (microfone ou loopback do desktopCapturer) via Web Audio API.
  */
 export function useMicrophoneLevel(
   stream: MediaStream | null,
-  enabled: boolean
+  enabled: boolean,
+  meta?: { mode?: string; label?: string }
 ): AudioCaptureLevel | null {
   const [level, setLevel] = useState<AudioCaptureLevel | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -182,8 +183,8 @@ export function useMicrophoneLevel(
       const peakDbFs = peak > 1e-9 ? 20 * Math.log10(peak) : -90;
       setLevel({
         capturing: true,
-        mode: "microphone",
-        label: "Microfone",
+        mode: meta?.mode || "microphone",
+        label: meta?.label || (meta?.mode && meta.mode !== "microphone" ? "Saída do sistema" : "Microfone"),
         dbFs: Number(dbFs.toFixed(1)),
         peakDbFs: Number(peakDbFs.toFixed(1)),
         rms: Number(rms.toFixed(4)),
@@ -209,13 +210,13 @@ export function useMicrophoneLevel(
       ctxRef.current = null;
       setLevel(null);
     };
-  }, [stream, enabled]);
+  }, [stream, enabled, meta?.mode, meta?.label]);
 
   return level;
 }
 
 /**
- * Escuta níveis emitidos pelo main (loopback WASAPI).
+ * Escuta níveis emitidos pelo main (medidor armado no main process).
  */
 export function useMainAudioCaptureLevel(enabled: boolean): AudioCaptureLevel | null {
   const [level, setLevel] = useState<AudioCaptureLevel | null>(null);

@@ -821,7 +821,7 @@ function setupIpcHandlers(dependencies) {
 
   ipcMain.handle("audio:sources:list", async () => {
     if (!audioSourceEnumerator) {
-      return { modes: ["microphone"], outputs: [], ffmpegAvailable: false };
+      return { modes: ["microphone"], outputs: [], platformSupported: false };
     }
     return audioSourceEnumerator.listSources();
   });
@@ -1046,7 +1046,6 @@ function setupIpcHandlers(dependencies) {
     if (!ffmpegInstaller) {
       return {
         available: false,
-        wasapiSupported: false,
         path: "",
         managedPath: "",
         installState: "failed",

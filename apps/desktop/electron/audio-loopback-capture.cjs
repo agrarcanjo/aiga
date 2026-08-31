@@ -1,7 +1,5 @@
 // Loopback capture — medidor/arming only.
-// Captura real de áudio do sistema é feita no renderer via desktopCapturer
-// (FFmpeg upstream não possui input WASAPI).
-const { resolveFfmpegPath } = require("./ffmpeg-installer.cjs");
+// Captura real de áudio do sistema é feita no renderer via desktopCapturer.
 
 function createAudioLoopbackCapture(options) {
   const logger = options?.logger || { info: () => {}, warn: () => {}, error: () => {} };
@@ -33,8 +31,7 @@ function createAudioLoopbackCapture(options) {
     logger.info("Loopback capture armed (renderer desktopCapturer)", {
       sessionId,
       mode,
-      deviceId,
-      ffmpegPath: resolveFfmpegPath()
+      deviceId
     });
     return { mode: mode === "microphone" ? "microphone" : "loopback", deviceId };
   }

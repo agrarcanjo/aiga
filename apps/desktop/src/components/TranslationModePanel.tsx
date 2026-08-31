@@ -6,13 +6,12 @@ import type {
 } from "@clone-perssua/shared-types";
 import {
   AudioCaptureHud,
-  useMainAudioCaptureLevel,
   useMicrophoneLevel,
 } from "./AudioCaptureHud";
 import {
-  getDesktopLoopbackSource,
-  openSystemAudioStream,
-  stopMediaStream,
+  startChunkedCapture,
+  testCaptureSource,
+  type ChunkedCaptureController,
 } from "../lib/systemAudioCapture";
 
 const C = {
@@ -69,14 +68,13 @@ export function TranslationModePanel({
   const [error, setError] = useState("");
   const [preflightStatus, setPreflightStatus] = useState("");
 
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [micStream, setMicStream] = useState<MediaStream | null>(null);
+  const captureRef = useRef<ChunkedCaptureController | null>(null);
+  const [captureStream, setCaptureStream] = useState<MediaStream | null>(null);
 
-  const loopbackLevel = useMainAudioCaptureLevel(active && captureMode !== "microphone");
-  const micLevel = useMicrophoneLevel(micStream, active && captureMode === "microphone");
-  const captureLevel = captureMode === "microphone" ? micLevel : loopbackLevel;
+  const captureLevel = useMicrophoneLevel(captureStream, active, {
+    mode: captureMode,
+    label: captureModeLabel(captureMode),
+  });
 
   const loadPrefs = useCallback(async () => {
     const [settingsRes, llmRes] = await Promise.all([
@@ -147,87 +145,57 @@ export function TranslationModePanel({
     };
   }, [loadPrefs, prefs.historyLines]);
 
-  function stopMic(): void {
-    if (chunkTimerRef.current) {
-      clearInterval(chunkTimerRef.current);
-      chunkTimerRef.current = null;
-    }
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    setMicStream(null);
+  useEffect(
+    () => () => {
+      captureRef.current?.stop();
+      captureRef.current = null;
+    },
+    []
+  );
+
+  function stopCapture(): void {
+    captureRef.current?.stop();
+    captureRef.current = null;
+    setCaptureStream(null);
   }
 
   async function runPreflight(): Promise<boolean> {
     setPreflightStatus("");
     const capture = await ensureCaptureReady();
-    if (capture.mode === "microphone") {
-      try {
-        const stream = await globalThis.navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((t) => t.stop());
-        setPreflightStatus("Microfone OK");
-        return true;
-      } catch {
-        setError("Microfone inacessível. Em Configurações → Captura áudio, escolha Saída do sistema.");
-        return false;
-      }
-    }
-    const test = await window.desktopApi.testAudioSource({
-      mode: capture.mode,
-      deviceId: capture.deviceId || "default",
-    });
-    if (!test.ok) {
+    const test = await testCaptureSource(capture.mode, capture.mode === "microphone" ? 1200 : 3000);
+    if (!test.ok && test.peakDbFs <= -89) {
       setError(
-        test.message ||
-          "Falha no teste de áudio. Em Configurações → Captura áudio, selecione o dispositivo de saída e teste a fonte."
+        `${test.message} Ajuste a fonte em Configurações → Captura áudio.`
       );
       return false;
     }
-    setPreflightStatus(test.message || "Fonte de áudio OK");
+    setPreflightStatus(test.message);
     return true;
   }
 
-  async function startMicChunks(): Promise<void> {
-    const stream = await globalThis.navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef.current = stream;
-    setMicStream(stream);
-    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-      ? "audio/webm;codecs=opus"
-      : "audio/webm";
-    const recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 16000 });
-    recorderRef.current = recorder;
-
-    recorder.ondataavailable = async (ev) => {
-      if (!ev.data.size) return;
-      const buf = await ev.data.arrayBuffer();
-      const bytes = new Uint8Array(buf);
-      let binary = "";
-      for (let i = 0; i < bytes.length; i += 1) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const chunkBase64 = btoa(binary);
-      try {
-        const status = await window.desktopApi.getTranslationSessionStatus();
-        if (status?.sessionId) {
-          void window.desktopApi.saveMeetingAudioChunk({
-            sessionId: status.sessionId,
-            chunkBase64,
-            extension: "webm",
-            kind: "translation",
-          });
+  async function startCaptureChunks(mode: string): Promise<void> {
+    const controller = await startChunkedCapture({
+      mode,
+      timesliceMs: 6000,
+      onChunk: async (chunkBase64) => {
+        try {
+          const status = await window.desktopApi.getTranslationSessionStatus();
+          if (status?.sessionId) {
+            void window.desktopApi.saveMeetingAudioChunk({
+              sessionId: status.sessionId,
+              chunkBase64,
+              extension: "webm",
+              kind: "translation",
+            });
+          }
+          await window.desktopApi.ingestTranslationMicChunk({ chunkBase64 });
+        } catch {
+          // non-fatal
         }
-        await window.desktopApi.ingestTranslationMicChunk({ chunkBase64 });
-      } catch {
-        // non-fatal
-      }
-    };
-
-    recorder.start();
-    chunkTimerRef.current = setInterval(() => {
-      if (recorder.state === "recording") recorder.stop();
-      recorder.start();
-    }, 6000);
+      },
+    });
+    captureRef.current = controller;
+    setCaptureStream(controller.stream);
   }
 
   async function handleStart(): Promise<void> {
@@ -248,8 +216,12 @@ export function TranslationModePanel({
         consentTextVersion: consentTextVersion || undefined,
       });
       setActive(true);
-      if (started.captureMode === "microphone" || captureMode === "microphone") {
-        await startMicChunks();
+      try {
+        await startCaptureChunks(started.captureMode || captureMode);
+      } catch (captureError) {
+        await window.desktopApi.stopTranslationSession();
+        setActive(false);
+        throw captureError;
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao iniciar tradução");
@@ -257,7 +229,7 @@ export function TranslationModePanel({
   }
 
   async function handleStop(): Promise<void> {
-    stopMic();
+    stopCapture();
     try {
       await window.desktopApi.stopTranslationSession();
       setActive(false);

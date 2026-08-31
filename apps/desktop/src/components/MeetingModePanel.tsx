@@ -8,11 +8,12 @@ import type {
   UserProfile,
 } from "@clone-perssua/shared-types";
 import { MeetingWizard, type MeetingWizardValues } from "./MeetingWizard";
+import { AudioCaptureHud, useMicrophoneLevel } from "./AudioCaptureHud";
 import {
-  AudioCaptureHud,
-  useMainAudioCaptureLevel,
-  useMicrophoneLevel,
-} from "./AudioCaptureHud";
+  startChunkedCapture,
+  testCaptureSource,
+  type ChunkedCaptureController,
+} from "../lib/systemAudioCapture";
 
 const C = {
   surface: "#1a1a1a",
@@ -79,21 +80,19 @@ export function MeetingModePanel({
   const [midSummaryLoading, setMidSummaryLoading] = useState(false);
   const [error, setError] = useState("");
   const [captureMode, setCaptureMode] = useState<string>("microphone");
-  const [audioDeviceId, setAudioDeviceId] = useState<string | undefined>();
   const [preflightStatus, setPreflightStatus] = useState("");
   const [activeAlerts, setActiveAlerts] = useState<MeetingActiveAlertEvent[]>([]);
   const [pendingStealthAlerts, setPendingStealthAlerts] = useState(0);
 
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const captureRef = useRef<ChunkedCaptureController | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
-  const [micStream, setMicStream] = useState<MediaStream | null>(null);
+  const [captureStream, setCaptureStream] = useState<MediaStream | null>(null);
 
   const isLive = Boolean(meetingSessionId) && (status === "recording" || status === "processing");
-  const loopbackLevel = useMainAudioCaptureLevel(isLive && captureMode !== "microphone");
-  const micLevel = useMicrophoneLevel(micStream, isLive && captureMode === "microphone");
-  const captureLevel = captureMode === "microphone" ? micLevel : loopbackLevel;
+  const captureLevel = useMicrophoneLevel(captureStream, isLive, {
+    mode: captureMode,
+    label: captureMode === "microphone" ? "Microfone" : "Saída do sistema",
+  });
 
   const patchWizard = useCallback((patch: Partial<MeetingWizardValues>) => {
     setWizard((prev) => ({ ...prev, ...patch }));
@@ -114,7 +113,6 @@ export function MeetingModePanel({
     });
     void window.desktopApi.getSettings().then((r) => {
       setCaptureMode(r.settings.audioCapture?.mode || "microphone");
-      setAudioDeviceId(r.settings.audioCapture?.deviceId);
       const prefs = r.settings.meetingPrefs;
       if (prefs) {
         patchWizard({
@@ -178,15 +176,9 @@ export function MeetingModePanel({
   }, [meetingSessionId, stealthEnabled]);
 
   function stopMicCapture(): void {
-    if (chunkTimerRef.current) {
-      clearInterval(chunkTimerRef.current);
-      chunkTimerRef.current = null;
-    }
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    setMicStream(null);
+    captureRef.current?.stop();
+    captureRef.current = null;
+    setCaptureStream(null);
   }
 
   function parseAliases(): string[] {
@@ -226,67 +218,36 @@ export function MeetingModePanel({
     }
   }
 
-  async function startMicChunks(): Promise<void> {
-    const stream = await globalThis.navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef.current = stream;
-    setMicStream(stream);
-    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-      ? "audio/webm;codecs=opus"
-      : "audio/webm";
-    const recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 16000 });
-    recorderRef.current = recorder;
-
-    recorder.ondataavailable = async (ev) => {
-      if (!ev.data.size) return;
-      const buf = await ev.data.arrayBuffer();
-      const bytes = new Uint8Array(buf);
-      let binary = "";
-      for (let i = 0; i < bytes.length; i += 1) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const chunkBase64 = btoa(binary);
-      const sid = activeSessionIdRef.current;
-      if (sid) {
-        void window.desktopApi.saveMeetingAudioChunk({
-          sessionId: sid,
-          chunkBase64,
-          extension: "webm",
-          kind: "meeting",
-        });
-      }
-      await transcribeChunk(chunkBase64);
-    };
-
-    recorder.start();
-    chunkTimerRef.current = setInterval(() => {
-      if (recorder.state === "recording") recorder.stop();
-      recorder.start();
-    }, 8000);
+  async function startCaptureChunks(mode: string): Promise<void> {
+    const controller = await startChunkedCapture({
+      mode,
+      timesliceMs: 8000,
+      onChunk: async (chunkBase64) => {
+        const sid = activeSessionIdRef.current;
+        if (sid) {
+          void window.desktopApi.saveMeetingAudioChunk({
+            sessionId: sid,
+            chunkBase64,
+            extension: "webm",
+            kind: "meeting",
+          });
+        }
+        await transcribeChunk(chunkBase64);
+      },
+    });
+    captureRef.current = controller;
+    setCaptureStream(controller.stream);
   }
 
   async function runAudioPreflight(modeOverride?: string): Promise<boolean> {
     setPreflightStatus("");
     const mode = modeOverride || captureMode;
-    if (mode === "microphone") {
-      try {
-        const stream = await globalThis.navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((t) => t.stop());
-        setPreflightStatus("Microfone OK");
-        return true;
-      } catch {
-        setError("Microfone inacessível. Configure em Configurações → Microfone.");
-        return false;
-      }
-    }
-    const test = await window.desktopApi.testAudioSource({
-      mode,
-      deviceId: audioDeviceId,
-    });
-    if (!test.ok) {
-      setError(test.message || "Falha no teste da fonte de áudio.");
+    const test = await testCaptureSource(mode, mode === "microphone" ? 1200 : 3000);
+    if (!test.ok && test.peakDbFs <= -89) {
+      setError(`${test.message} Ajuste em Configurações → Captura áudio.`);
       return false;
     }
-    setPreflightStatus(test.message || "Fonte de áudio OK");
+    setPreflightStatus(test.message);
     return true;
   }
 
@@ -355,9 +316,7 @@ export function MeetingModePanel({
       setElapsedSeconds(0);
       setBookmarkCount(0);
       setTokenBudgetLevel("ok");
-      if (effectiveCaptureMode === "microphone") {
-        await startMicChunks();
-      }
+      await startCaptureChunks(effectiveCaptureMode);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao iniciar");
     }
