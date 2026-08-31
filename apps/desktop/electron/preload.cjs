@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   setStealthMode: (payload) => ipcRenderer.invoke("stealth:set-mode", payload),
   toggleFullStealth: () => ipcRenderer.invoke("stealth:toggle-full"),
   exitFullStealth: () => ipcRenderer.invoke("stealth:exit-full"),
+  getContentProtectionStatus: () => ipcRenderer.invoke("stealth:content-protection"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (payload) => ipcRenderer.invoke("settings:save", payload),
   resetSettings: () => ipcRenderer.invoke("settings:reset"),

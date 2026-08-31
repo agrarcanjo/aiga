@@ -2,13 +2,9 @@
 const path = require("node:path");
 const { BrowserWindow } = require("electron");
 
+// Content protection do overlay é mantida pelo content-protection-guard no main.
 function applyOverlayStealthProfile(windowRef, hardening) {
   const level = hardening || "safe";
-  if (level === "off") {
-    windowRef.setContentProtection(false);
-    return;
-  }
-  windowRef.setContentProtection(true);
   if (level === "strict") {
     windowRef.setOpacity(0.88);
   }

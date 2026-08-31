@@ -348,7 +348,7 @@ function createTranscriptionPacksService(options) {
             emitProgress({
               kind: "setup",
               status: "downloading",
-              message: "Instalando ffmpeg (captura de áudio do sistema)…"
+              message: "Instalando ffmpeg (conversão de áudio para transcrição)…"
             });
             await ffmpegInstaller.installPortable();
           }

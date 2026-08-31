@@ -11,9 +11,18 @@ function createStealthWindowService(dependencies) {
     error: () => {}
   };
   const getMainWindow = dependencies?.getMainWindow;
+  const contentProtectionGuard = dependencies?.contentProtectionGuard;
 
   if (typeof getMainWindow !== "function") {
     throw new Error("StealthWindowService requires getMainWindow dependency.");
+  }
+
+  function setContentProtection(windowRef, protectionEnabled) {
+    if (contentProtectionGuard) {
+      contentProtectionGuard.setEnabled(protectionEnabled);
+      return;
+    }
+    windowRef.setContentProtection(protectionEnabled);
   }
 
   let isStealthEnabled = false;
@@ -35,7 +44,7 @@ function createStealthWindowService(dependencies) {
    * Restaura o perfil padrão para operação normal.
    */
   function applyNormalProfile(windowRef) {
-    windowRef.setContentProtection(false);
+    setContentProtection(windowRef, false);
     windowRef.setAlwaysOnTop(false);
     windowRef.setSkipTaskbar(false);
     windowRef.setOpacity(1);
@@ -62,7 +71,7 @@ function createStealthWindowService(dependencies) {
     }
 
     if (hardening === "safe") {
-      windowRef.setContentProtection(true);
+      setContentProtection(windowRef, true);
       windowRef.setSkipTaskbar(true);
       windowRef.setAlwaysOnTop(true, "floating");
       windowRef.setOpacity(effectiveOpacity);
@@ -78,7 +87,7 @@ function createStealthWindowService(dependencies) {
       return;
     }
 
-    windowRef.setContentProtection(true);
+    setContentProtection(windowRef, true);
     windowRef.setSkipTaskbar(true);
     windowRef.setAlwaysOnTop(true, "screen-saver");
     windowRef.setOpacity(effectiveOpacity);
@@ -97,7 +106,7 @@ function createStealthWindowService(dependencies) {
    * Oculta completamente a janela mantendo o modo stealth lógico ativo.
    */
   function applyFullStealthProfile(windowRef) {
-    windowRef.setContentProtection(true);
+    setContentProtection(windowRef, true);
     windowRef.setSkipTaskbar(true);
     windowRef.setAlwaysOnTop(false);
     windowRef.setIgnoreMouseEvents(true, { forward: true });

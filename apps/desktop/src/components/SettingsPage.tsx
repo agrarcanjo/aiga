@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import type { LogLevel, SetupChecklistItem, SetupChecklistResponse } from "@clone-perssua/shared-types";
+import type {
+  ContentProtectionStatus,
+  LogLevel,
+  SetupChecklistItem,
+  SetupChecklistResponse,
+} from "@clone-perssua/shared-types";
 import { AudioCaptureSettings } from "./AudioCaptureSettings";
 import { ScreenCaptureSettings } from "./ScreenCaptureSettings";
 import { AutoUpdateSettings } from "./AutoUpdateSettings";
@@ -213,7 +218,10 @@ export function SettingsPage({
 
   const [recentLogs, setRecentLogs] = useState<string[]>([]);
   const [logLevel, setLogLevel] = useState<LogLevel>("info");
+  const [logFilePath, setLogFilePath] = useState("");
+  const [logCopyStatus, setLogCopyStatus] = useState("");
   const [purgeStatus, setPurgeStatus] = useState("");
+  const [protection, setProtection] = useState<ContentProtectionStatus | null>(null);
   const [checklist, setChecklist] = useState<SetupChecklistResponse | null>(null);
 
   const loadChecklist = useCallback(async () => {
@@ -238,6 +246,12 @@ export function SettingsPage({
     const diag = await window.desktopApi.getDiagnostics();
     setRecentLogs(diag.recentLines || []);
     setLogLevel(diag.logLevel);
+    setLogFilePath(diag.logFilePath || "");
+    try {
+      setProtection(await window.desktopApi.getContentProtectionStatus());
+    } catch {
+      setProtection(null);
+    }
     await loadChecklist();
   }, [loadChecklist]);
 
@@ -538,6 +552,41 @@ export function SettingsPage({
                 Salvar geral
               </button>
               {generalStatus && <span style={{ color: C.success, fontSize: 12 }}>{generalStatus}</span>}
+
+              <div
+                style={{
+                  border: `1px solid ${protection && !protection.platformSupported ? C.error : C.border}`,
+                  borderRadius: 6,
+                  padding: 12,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                }}
+              >
+                <span style={{ color: C.text, fontSize: 13, fontWeight: 600 }}>
+                  Proteção contra compartilhamento de tela
+                </span>
+                <span
+                  style={{
+                    color: protection?.enabled ? C.success : C.error,
+                    fontSize: 12,
+                    userSelect: "text",
+                  }}
+                >
+                  {protection
+                    ? `${protection.enabled ? "Ativa" : "Desativada"} · ${protection.windowCount} janela(s) · ${protection.platformDetail}`
+                    : "Status indisponível."}
+                </span>
+                {protection && !protection.platformSupported && (
+                  <span style={{ color: C.error, fontSize: 11 }}>
+                    Neste sistema a janela pode aparecer no compartilhamento. Use o full stealth
+                    (Ctrl+Shift+H) ou compartilhe apenas uma janela específica.
+                  </span>
+                )}
+                <button type="button" style={sb} onClick={() => void load()}>
+                  Reaplicar e verificar
+                </button>
+              </div>
             </div>
           )}
 
@@ -727,7 +776,53 @@ export function SettingsPage({
                 <button type="button" style={sb} onClick={() => void load()}>
                   Atualizar
                 </button>
+                <button
+                  type="button"
+                  style={sb}
+                  onClick={() => {
+                    void (async () => {
+                      const text = recentLogs.join("\n");
+                      try {
+                        await navigator.clipboard.writeText(text);
+                        setLogCopyStatus("Logs copiados para a área de transferência.");
+                      } catch {
+                        setLogCopyStatus("Não foi possível copiar. Selecione o texto abaixo.");
+                      }
+                    })();
+                  }}
+                >
+                  Copiar logs
+                </button>
+                <button
+                  type="button"
+                  style={sb}
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        await navigator.clipboard.writeText(logFilePath);
+                        setLogCopyStatus(`Caminho copiado: ${logFilePath}`);
+                      } catch {
+                        setLogCopyStatus(logFilePath);
+                      }
+                    })();
+                  }}
+                >
+                  Copiar caminho do log
+                </button>
               </div>
+              {logCopyStatus && (
+                <p
+                  style={{
+                    color: C.textMuted,
+                    fontSize: 11,
+                    margin: 0,
+                    userSelect: "text",
+                    WebkitUserSelect: "text",
+                  }}
+                >
+                  {logCopyStatus}
+                </p>
+              )}
               <pre
                 style={{
                   background: C.bg,
@@ -740,6 +835,9 @@ export function SettingsPage({
                   overflowY: "auto",
                   whiteSpace: "pre-wrap",
                   margin: 0,
+                  userSelect: "text",
+                  WebkitUserSelect: "text",
+                  cursor: "text",
                 }}
               >
                 {recentLogs.length === 0

@@ -23,6 +23,7 @@ const { createAudioLoopbackCapture } = require("./audio-loopback-capture.cjs");
 const { createMeetingAudioArchive } = require("./meeting-audio-archive.cjs");
 const { createSttAdapter } = require("./stt-adapter.cjs");
 const { createStealthWindowService } = require("./stealth-window-service.cjs");
+const { createContentProtectionGuard } = require("./content-protection-guard.cjs");
 const { applyStealthFromSettings } = require("./stealth-profile.cjs");
 const { createLocalProvider } = require("./local-provider.cjs");
 const { createProviderRouter } = require("./provider-router.cjs");
@@ -44,6 +45,7 @@ const { CHAT_WINDOW } = require("./window-layout.cjs");
 let logger;
 let shortcutService;
 let stealthWindowService;
+let contentProtectionGuard;
 let settingsStoreRef;
 let envConfigRef;
 let mainWindowRef;
@@ -84,6 +86,9 @@ function createWindow() {
   // Aplica content protection imediatamente, antes de qualquer frame ser renderizado.
   // Isso impede que a janela apareça em prints, compartilhamento de tela e gravações.
   mainWindowRef.setContentProtection(true);
+  if (contentProtectionGuard) {
+    contentProtectionGuard.register(mainWindowRef);
+  }
 
   const url = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
   logger.debug("Loading renderer URL", { url });
@@ -217,9 +222,22 @@ app.whenReady().then(() => {
     audioSourceEnumerator
   });
   const audioSourceValidator = createAudioSourceValidator({ logger });
+  contentProtectionGuard = createContentProtectionGuard({ logger });
+  contentProtectionGuard.start();
+  // Cobre janelas criadas depois (overlay de tradução, etc.).
+  app.on("browser-window-created", (_event, createdWindow) => {
+    contentProtectionGuard.register(createdWindow);
+  });
+  const protectionState = contentProtectionGuard.getState();
+  if (!protectionState.platformSupported) {
+    logger.warn("Content protection limitada nesta plataforma", {
+      detail: protectionState.platformDetail
+    });
+  }
   stealthWindowService = createStealthWindowService({
     logger,
-    getMainWindow: () => mainWindowRef
+    getMainWindow: () => mainWindowRef,
+    contentProtectionGuard
   });
   let meetingOrchestrator;
   let translationSession;
@@ -361,6 +379,7 @@ app.whenReady().then(() => {
     sttAdapter,
     autoUpdateService,
     stealthWindowService,
+    contentProtectionGuard,
     getMainWindow: () => mainWindowRef,
     emitRendererEvent: emitToAllWindows
   });

@@ -587,6 +587,16 @@ export interface SettingsResetResponse {
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
+export interface ContentProtectionStatus {
+  enabled: boolean;
+  platformSupported: boolean;
+  protectionLevel: "full" | "partial" | "none";
+  platformDetail: string;
+  windowCount: number;
+  watchdogActive: boolean;
+  lastError: string;
+}
+
 export interface DiagnosticsGetResponse {
   logLevel: LogLevel;
   logFilePath: string;
@@ -701,6 +711,7 @@ export interface DesktopApi {
   setStealthMode(payload: StealthSetModeRequest): Promise<StealthSetModeResponse>;
   toggleFullStealth(): Promise<StealthSetModeResponse>;
   exitFullStealth(): Promise<{ changed: boolean; enabled: boolean; fullStealth: boolean; appliedAtIso: string }>;
+  getContentProtectionStatus(): Promise<ContentProtectionStatus>;
   getSettings(): Promise<SettingsGetResponse>;
   saveSettings(payload: SettingsSaveRequest): Promise<SettingsSaveResponse>;
   resetSettings(): Promise<SettingsResetResponse>;

@@ -17,9 +17,32 @@ function ensureDirectory(dirPath) {
   }
 }
 
+function getManagedWhisperCliDir() {
+  return path.join(app.getPath("userData"), "runtime", "whisper");
+}
+
 function getManagedWhisperCliPath() {
   const binaryName = process.platform === "win32" ? "whisper-cli.exe" : "whisper-cli";
+  return path.join(getManagedWhisperCliDir(), binaryName);
+}
+
+function getLegacyWhisperCliPath() {
+  const binaryName = process.platform === "win32" ? "whisper-cli.exe" : "whisper-cli";
   return path.join(app.getPath("userData"), "runtime", binaryName);
+}
+
+// whisper-cli.exe depende das DLLs do pacote (ggml*, whisper); sem elas o processo sai com 0xC0000135.
+function hasRuntimeLibraries(binaryPath) {
+  if (process.platform !== "win32") {
+    return true;
+  }
+  try {
+    return fs
+      .readdirSync(path.dirname(binaryPath))
+      .some((name) => name.toLowerCase().endsWith(".dll"));
+  } catch {
+    return false;
+  }
 }
 
 function downloadToFile(url, destinationPath, onProgress) {
@@ -130,13 +153,23 @@ function createWhisperCliInstaller(options) {
     const candidates = [
       fromEnv,
       managed,
+      getLegacyWhisperCliPath(),
       path.join(process.cwd(), "bin", path.basename(managed))
     ].filter(Boolean);
-    const found = candidates.find((candidate) => fs.existsSync(candidate)) || "";
+    const found =
+      candidates.find((candidate) => fs.existsSync(candidate) && hasRuntimeLibraries(candidate)) ||
+      "";
+    const incomplete = candidates.find(
+      (candidate) => fs.existsSync(candidate) && !hasRuntimeLibraries(candidate)
+    );
     return {
       available: Boolean(found),
       path: found,
-      managedPath: managed
+      managedPath: managed,
+      lastError:
+        !found && incomplete
+          ? `whisper-cli em ${incomplete} esta sem as DLLs do runtime. Reinstale o runtime de transcricao.`
+          : ""
     };
   }
 
@@ -195,12 +228,23 @@ function createWhisperCliInstaller(options) {
         throw new Error("whisper-cli.exe nao encontrado no pacote baixado.");
       }
 
-      fs.copyFileSync(sourceBinary, destination);
+      // Copia todo o diretorio do binario para trazer as DLLs (ggml*, whisper, SDL2).
+      const sourceDir = path.dirname(sourceBinary);
+      const targetDir = getManagedWhisperCliDir();
+      ensureDirectory(targetDir);
+      for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+        if (!entry.isFile()) {
+          continue;
+        }
+        fs.copyFileSync(path.join(sourceDir, entry.name), path.join(targetDir, entry.name));
+      }
       process.env.WHISPER_CLI_PATH = destination;
 
       const verified = await detect();
       if (!verified.available) {
-        throw new Error("whisper-cli instalado mas nao foi encontrado no destino.");
+        throw new Error(
+          verified.lastError || "whisper-cli instalado mas nao foi encontrado no destino."
+        );
       }
 
       logger.info("whisper-cli install: ready", { path: destination });
@@ -231,12 +275,16 @@ function createWhisperCliInstaller(options) {
   return {
     detect,
     installPortable,
-    getManagedWhisperCliPath
+    getManagedWhisperCliPath,
+    getManagedWhisperCliDir
   };
 }
 
 module.exports = {
   createWhisperCliInstaller,
   getManagedWhisperCliPath,
+  getManagedWhisperCliDir,
+  getLegacyWhisperCliPath,
+  hasRuntimeLibraries,
   DEFAULT_WHISPER_CLI_ZIP_URL
 };

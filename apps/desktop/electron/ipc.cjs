@@ -304,6 +304,7 @@ function setupIpcHandlers(dependencies) {
   const sttAdapter = dependencies?.sttAdapter;
   const autoUpdateService = dependencies?.autoUpdateService;
   const stealthWindowService = dependencies?.stealthWindowService;
+  const contentProtectionGuard = dependencies?.contentProtectionGuard;
   const getMainWindow = dependencies?.getMainWindow;
   const emitRendererEvent = dependencies?.emitRendererEvent;
 
@@ -631,6 +632,22 @@ function setupIpcHandlers(dependencies) {
       fullStealth: Boolean(applied.fullStealth),
       appliedAtIso: applied.appliedAtIso
     };
+  });
+
+  ipcMain.handle("stealth:content-protection", async () => {
+    if (!contentProtectionGuard) {
+      return {
+        enabled: false,
+        platformSupported: false,
+        protectionLevel: "none",
+        platformDetail: "Guard de content protection indisponivel.",
+        windowCount: 0,
+        watchdogActive: false,
+        lastError: ""
+      };
+    }
+    contentProtectionGuard.applyAll();
+    return contentProtectionGuard.getState();
   });
 
   ipcMain.handle("settings:get", async () => {

@@ -267,8 +267,11 @@ Variaveis principais:
 - O STT local agora inclui um manager dedicado para whisper-cli no main process.
 - Resolucao do binario nesta ordem:
 	- `WHISPER_CLI_PATH`
+	- `userData/runtime/whisper/whisper-cli(.exe)` (instalacao automatica, com as DLLs do pacote)
 	- `userData/runtime/whisper-cli(.exe)`
 	- `bin/whisper-cli(.exe)` na raiz do workspace
+- O binario so e considerado valido se as DLLs do runtime estiverem na mesma pasta; sem elas o Windows encerra o processo com `3221225781` (`STATUS_DLL_NOT_FOUND`).
+- Os chunks capturados (webm/opus) sao convertidos por `ffmpeg` para WAV PCM mono 16 kHz antes do whisper-cli.
 - Resolucao do modelo nesta ordem:
 	- `WHISPER_MODEL_PATH`
 	- `userData/runtime/models/ggml-base.bin`
@@ -315,6 +318,10 @@ Variaveis principais:
 
 ## Stealth validation e self-check
 
+- Content protection (`setContentProtection`) e aplicada em **todas** as janelas (principal e overlay de traducao) na criacao, reaplicada em eventos de `show/restore/move/focus`, em mudanca de monitores e por watchdog periodico no main process.
+- Requisito de plataforma: Windows 10 versao 2004 (build 19041) ou superior para `WDA_EXCLUDEFROMCAPTURE`. Em builds anteriores a janela aparece como retangulo preto no compartilhamento, nao invisivel.
+- **Configuracoes → Geral** mostra o status atual (`Protecao contra compartilhamento de tela`), o numero de janelas protegidas e permite reaplicar/verificar.
+- Se o sistema nao suportar exclusao de captura, use full stealth (`Ctrl+Shift+H`) ou compartilhe apenas uma janela especifica em vez da tela inteira.
 - O app inclui uma matriz operacional para validar stealth manualmente em Zoom, Google Meet e Microsoft Teams.
 - Cada cenário pode ser marcado como `pending`, `pass`, `risk` ou `fail`, com observações de evidência.
 - O app também inclui um checklist de self-check pré-apresentação para confirmar:

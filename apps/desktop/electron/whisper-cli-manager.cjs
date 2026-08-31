@@ -4,6 +4,11 @@ const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
 const { app } = require("electron");
+const { hasRuntimeLibraries } = require("./whisper-cli-installer.cjs");
+const { resolveFfmpegPath } = require("./ffmpeg-installer.cjs");
+
+// 0xC0000135 no Windows: processo nao iniciou por DLL ausente ao lado do executavel.
+const STATUS_DLL_NOT_FOUND = 3221225781;
 
 /**
  * Cria manager do whisper-cli para transcricao local por execucao isolada.
@@ -27,11 +32,15 @@ function createWhisperCliManager(options) {
   function resolveBinaryPath() {
     const candidates = [
       configuredPath,
+      path.join(app.getPath("userData"), "runtime", "whisper", defaultBinaryName),
       path.join(app.getPath("userData"), "runtime", defaultBinaryName),
       path.join(process.cwd(), "bin", defaultBinaryName)
     ].filter(Boolean);
 
-    return candidates.find((candidate) => fs.existsSync(candidate)) || "";
+    const complete = candidates.find(
+      (candidate) => fs.existsSync(candidate) && hasRuntimeLibraries(candidate)
+    );
+    return complete || "";
   }
 
   function resolveModelPath() {
@@ -96,7 +105,8 @@ function createWhisperCliManager(options) {
 
     if (!binaryPath) {
       status = "unavailable";
-      lastError = "Binario whisper-cli nao encontrado. Defina WHISPER_CLI_PATH ou instale em userData/runtime.";
+      lastError =
+        "Binario whisper-cli (com as DLLs do runtime) nao encontrado. Reinstale o runtime em Configuracoes > Traducao ou defina WHISPER_CLI_PATH.";
       logger.warn("whisper-cli unavailable", { lastError });
       return getStatus();
     }
@@ -121,16 +131,75 @@ function createWhisperCliManager(options) {
     return getStatus();
   }
 
-  function writeChunkToTempWav(chunkBase64) {
+  function getTempDir() {
     const tempDir = path.join(os.tmpdir(), "clone-perssua-stt");
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
+    return tempDir;
+  }
 
-    const filePath = path.join(tempDir, `chunk-${Date.now()}-${Math.random().toString(16).slice(2)}.wav`);
-    const audioBuffer = Buffer.from(chunkBase64, "base64");
-    fs.writeFileSync(filePath, audioBuffer);
-    return filePath;
+  function isWavBuffer(buffer) {
+    return (
+      buffer.length > 12 &&
+      buffer.toString("ascii", 0, 4) === "RIFF" &&
+      buffer.toString("ascii", 8, 12) === "WAVE"
+    );
+  }
+
+  function writeChunkToTempFile(chunkBase64) {
+    const buffer = Buffer.from(chunkBase64 || "", "base64");
+    const extension = isWavBuffer(buffer) ? "wav" : "webm";
+    const filePath = path.join(
+      getTempDir(),
+      `chunk-${Date.now()}-${Math.random().toString(16).slice(2)}.${extension}`
+    );
+    fs.writeFileSync(filePath, buffer);
+    return { filePath, isWav: extension === "wav" };
+  }
+
+  /** whisper-cli so aceita WAV PCM 16 bits mono a 16 kHz. */
+  function convertToWhisperWav(inputPath) {
+    const outputPath = `${inputPath}.16k.wav`;
+    return new Promise((resolve, reject) => {
+      const proc = spawn(
+        resolveFfmpegPath(),
+        [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-i",
+          inputPath,
+          "-ac",
+          "1",
+          "-ar",
+          "16000",
+          "-c:a",
+          "pcm_s16le",
+          "-y",
+          outputPath
+        ],
+        { windowsHide: true }
+      );
+      let stderr = "";
+      proc.stderr.on("data", (chunk) => {
+        stderr += String(chunk || "");
+      });
+      proc.on("error", (error) =>
+        reject(
+          new Error(
+            `ffmpeg indisponivel para converter o audio (${error.message}). Instale o ffmpeg em Configuracoes > Traducao.`
+          )
+        )
+      );
+      proc.on("close", (code) => {
+        if (code === 0 && fs.existsSync(outputPath)) {
+          resolve(outputPath);
+          return;
+        }
+        reject(new Error(stderr.trim() || `ffmpeg falhou ao converter audio (codigo ${code}).`));
+      });
+    });
   }
 
   function parseWhisperOutput(stdoutText) {
@@ -148,13 +217,45 @@ function createWhisperCliManager(options) {
     return lines.join(" ").trim();
   }
 
+  function cleanupFiles(filePaths) {
+    for (const filePath of filePaths) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch {
+        // arquivo temporario pode ja ter sido removido
+      }
+    }
+  }
+
+  function describeExitFailure(code, stderr, binaryPath) {
+    if (code === STATUS_DLL_NOT_FOUND) {
+      return `whisper-cli nao iniciou: DLLs do runtime ausentes ao lado de ${binaryPath} (codigo ${code}). Reinstale o runtime de transcricao em Configuracoes > Traducao.`;
+    }
+    return stderr.trim() || `whisper-cli exited with code ${code}`;
+  }
+
   async function transcribeChunk(params) {
     const availability = await ensureAvailable();
     if (availability.state !== "ready") {
       throw new Error(availability.lastError || "Runtime Whisper indisponivel.");
     }
 
-    const tempAudioPath = writeChunkToTempWav(params.chunkBase64 || "");
+    const written = writeChunkToTempFile(params.chunkBase64 || "");
+    const tempFiles = [written.filePath];
+    let audioPath = written.filePath;
+
+    try {
+      audioPath = await convertToWhisperWav(written.filePath);
+      tempFiles.push(audioPath);
+    } catch (error) {
+      if (!written.isWav) {
+        cleanupFiles(tempFiles);
+        status = "error";
+        lastError = error instanceof Error ? error.message : String(error);
+        throw new Error(lastError);
+      }
+    }
+
     const binaryPath = availability.binaryPath;
     const modelPath = availability.modelPath;
     const language = params.language || "auto";
@@ -164,12 +265,13 @@ function createWhisperCliManager(options) {
     lastRunAtIso = new Date().toISOString();
 
     return new Promise((resolve, reject) => {
-      const args = ["-m", modelPath, "-f", tempAudioPath, "-otxt"];
+      const args = ["-m", modelPath, "-f", audioPath, "-otxt"];
       if (language !== "auto") {
         args.push("-l", language);
       }
 
       const child = spawn(binaryPath, args, {
+        cwd: path.dirname(binaryPath),
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true
       });
@@ -188,20 +290,17 @@ function createWhisperCliManager(options) {
       child.on("error", (error) => {
         status = "error";
         lastError = error.message;
-        try {
-          fs.unlinkSync(tempAudioPath);
-        } catch {}
+        cleanupFiles(tempFiles);
         reject(error);
       });
 
       child.on("close", (code) => {
         status = code === 0 ? "ready" : "error";
-        try {
-          fs.unlinkSync(tempAudioPath);
-        } catch {}
+        cleanupFiles(tempFiles);
 
         if (code !== 0) {
-          lastError = stderr.trim() || `whisper-cli exited with code ${code}`;
+          lastError = describeExitFailure(code, stderr, binaryPath);
+          logger.warn("whisper-cli run failed", { code, binaryPath, lastError });
           reject(new Error(lastError));
           return;
         }
