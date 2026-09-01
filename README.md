@@ -185,6 +185,8 @@ Variaveis principais:
 - Atalho no header: icone **👥** (Modo reuniao).
 - Modos: **Observador** (resumo ao encerrar), **Ativo** (alertas de pergunta), **Hibrido** (ambos).
 - Pre-teste de audio (microfone ou saida do sistema) antes de iniciar; o teste mede o pico real em dBFS.
+- Captura dupla: fora do modo so-microfone, a reuniao grava **saida do sistema + microfone** em paralelo, com medidor de nivel por fonte e marcacao de quem falou na transcricao (`[Voce]` / `[Reuniao]`).
+- A gravacao de audio do chat tambem exibe medidor de nivel ao vivo enquanto grava.
 - Durante gravacao: barra GRAVANDO; em stealth, **bandeja do sistema** com cronometro e menu Encerrar/Cancelar.
 - **Configuracoes → Reuniao:** roteamento LLM (resumo, classificador ativo, traducao), memoria do time, apelidos padrao.
 - Perfis de contexto: `context-store` (JSON em userData).

@@ -7,6 +7,7 @@ import type {
   StealthStateChangedEvent,
 } from "@clone-perssua/shared-types";
 import { MeetingModePanel } from "./components/MeetingModePanel";
+import { AudioCaptureHud, useMicrophoneLevel } from "./components/AudioCaptureHud";
 import { SettingsPage, type SettingsTabId } from "./components/SettingsPage";
 import { TranslationModePanel } from "./components/TranslationModePanel";
 
@@ -107,10 +108,15 @@ export function App(): JSX.Element {
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [pendingAudioId, setPendingAudioId] = useState<string | null>(null);
   const [pendingAudioDuration, setPendingAudioDuration] = useState(0);
+  const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null);
   const activeStreamRef = useRef<MediaStream | null>(null);
   const activeRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingStartRef = useRef(0);
+  const recordingLevel = useMicrophoneLevel(recordingStream, isRecording, {
+    mode: "microphone",
+    label: "Microfone (gravando)",
+  });
 
   // ── Init ────────────────────────────────────────────────────────────────
 
@@ -335,6 +341,7 @@ export function App(): JSX.Element {
       };
       const stream = await globalThis.navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
       activeStreamRef.current = stream;
+      setRecordingStream(stream);
 
       const mimeType = getSupportedAudioMimeType();
       const recorderOptions: MediaRecorderOptions = { audioBitsPerSecond: 16000 };
@@ -352,6 +359,7 @@ export function App(): JSX.Element {
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         activeStreamRef.current = null;
+        setRecordingStream(null);
         if (recordingTimerRef.current) {
           clearInterval(recordingTimerRef.current);
           recordingTimerRef.current = null;
@@ -419,6 +427,7 @@ export function App(): JSX.Element {
       activeStreamRef.current.getTracks().forEach((t) => t.stop());
       activeStreamRef.current = null;
     }
+    setRecordingStream(null);
     setIsRecording(false);
     setRecordingSeconds(0);
   }
@@ -964,6 +973,11 @@ export function App(): JSX.Element {
         </div>
 
         {/* ── Pending attachments (screenshots + audio) ──────────────────── */}
+        {isRecording && (
+          <div style={{ padding: "6px 12px", borderTop: `1px solid ${C.border}` }}>
+            <AudioCaptureHud level={recordingLevel} compact />
+          </div>
+        )}
         {(pendingItems.length > 0 || !!pendingAudioId) && (
           <div
             style={{

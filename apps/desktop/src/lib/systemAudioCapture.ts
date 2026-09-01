@@ -74,7 +74,10 @@ export async function openCaptureStream(mode: string): Promise<{
   audioStream: MediaStream;
 }> {
   if (!isLoopbackMode(mode)) {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // echoCancellation evita que o áudio da reunião volte pelo microfone e duplique a transcrição.
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+    });
     return { stream, audioStream: stream };
   }
   const source = await getDesktopLoopbackSource();
@@ -173,6 +176,68 @@ export interface CaptureTestResult {
   ok: boolean;
   peakDbFs: number;
   message: string;
+}
+
+export type CaptureSource = "microphone" | "system";
+
+export interface DualCaptureController {
+  micStream: MediaStream | null;
+  systemStream: MediaStream | null;
+  micError: string;
+  systemError: string;
+  stop: () => void;
+}
+
+/**
+ * Captura microfone e saída do sistema em paralelo, marcando a origem de cada bloco
+ * para distinguir quem falou (você x reunião).
+ */
+export async function startDualChunkedCapture(options: {
+  timesliceMs?: number;
+  onChunk: (chunkBase64: string, source: CaptureSource) => void | Promise<void>;
+}): Promise<DualCaptureController> {
+  const results = await Promise.allSettled([
+    startChunkedCapture({
+      mode: "microphone",
+      timesliceMs: options.timesliceMs,
+      onChunk: (chunk) => options.onChunk(chunk, "microphone"),
+    }),
+    startChunkedCapture({
+      mode: "system_loopback",
+      timesliceMs: options.timesliceMs,
+      onChunk: (chunk) => options.onChunk(chunk, "system"),
+    }),
+  ]);
+
+  const [mic, system] = results;
+  const micController = mic.status === "fulfilled" ? mic.value : null;
+  const systemController = system.status === "fulfilled" ? system.value : null;
+
+  if (!micController && !systemController) {
+    const reason = mic.status === "rejected" ? mic.reason : (system as PromiseRejectedResult).reason;
+    throw reason instanceof Error ? reason : new Error("Falha ao abrir as fontes de áudio.");
+  }
+
+  return {
+    micStream: micController?.stream ?? null,
+    systemStream: systemController?.stream ?? null,
+    micError:
+      mic.status === "rejected"
+        ? mic.reason instanceof Error
+          ? mic.reason.message
+          : String(mic.reason)
+        : "",
+    systemError:
+      system.status === "rejected"
+        ? system.reason instanceof Error
+          ? system.reason.message
+          : String(system.reason)
+        : "",
+    stop: () => {
+      micController?.stop();
+      systemController?.stop();
+    },
+  };
 }
 
 /**

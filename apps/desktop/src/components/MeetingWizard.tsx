@@ -296,13 +296,13 @@ export function MeetingWizard({
           {isInterview && (
             <p style={{ color: C.textMuted, fontSize: 11, margin: 0 }}>
               {captureMode === "microphone"
-                ? "Ao iniciar, a captura será ajustada para saída do sistema (áudio do entrevistador)."
-                : "Captura: saída do sistema / dispositivo configurado."}
+                ? "Ao iniciar, a captura será ajustada para saída do sistema + microfone (entrevistador e você)."
+                : "Captura: saída do sistema + microfone, com identificação de quem falou."}
             </p>
           )}
           {!isInterview && captureMode !== "microphone" && (
             <p style={{ color: C.textMuted, fontSize: 11, margin: 0 }}>
-              Captura: saída do sistema (loopback).
+              Captura: saída do sistema (reunião) + microfone (você).
             </p>
           )}
           {preflightStatus && (

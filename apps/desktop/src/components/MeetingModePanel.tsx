@@ -11,7 +11,10 @@ import { MeetingWizard, type MeetingWizardValues } from "./MeetingWizard";
 import { AudioCaptureHud, useMicrophoneLevel } from "./AudioCaptureHud";
 import {
   startChunkedCapture,
+  startDualChunkedCapture,
+  type CaptureSource,
   type ChunkedCaptureController,
+  type DualCaptureController,
 } from "../lib/systemAudioCapture";
 
 const C = {
@@ -83,14 +86,19 @@ export function MeetingModePanel({
   const [activeAlerts, setActiveAlerts] = useState<MeetingActiveAlertEvent[]>([]);
   const [pendingStealthAlerts, setPendingStealthAlerts] = useState(0);
 
-  const captureRef = useRef<ChunkedCaptureController | null>(null);
+  const captureRef = useRef<ChunkedCaptureController | DualCaptureController | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
-  const [captureStream, setCaptureStream] = useState<MediaStream | null>(null);
+  const [micStream, setMicStream] = useState<MediaStream | null>(null);
+  const [systemStream, setSystemStream] = useState<MediaStream | null>(null);
 
   const isLive = Boolean(meetingSessionId) && (status === "recording" || status === "processing");
-  const captureLevel = useMicrophoneLevel(captureStream, isLive, {
-    mode: captureMode,
-    label: captureMode === "microphone" ? "Microfone" : "Saída do sistema",
+  const micLevel = useMicrophoneLevel(micStream, isLive, {
+    mode: "microphone",
+    label: "Microfone (você)",
+  });
+  const systemLevel = useMicrophoneLevel(systemStream, isLive, {
+    mode: "system_loopback",
+    label: "Saída do sistema (reunião)",
   });
 
   const patchWizard = useCallback((patch: Partial<MeetingWizardValues>) => {
@@ -177,7 +185,8 @@ export function MeetingModePanel({
   function stopMicCapture(): void {
     captureRef.current?.stop();
     captureRef.current = null;
-    setCaptureStream(null);
+    setMicStream(null);
+    setSystemStream(null);
   }
 
   function parseAliases(): string[] {
@@ -197,7 +206,7 @@ export function MeetingModePanel({
     });
   }
 
-  async function transcribeChunk(base64: string): Promise<void> {
+  async function transcribeChunk(base64: string, source: CaptureSource): Promise<void> {
     const sid = activeSessionIdRef.current;
     if (!sid) return;
     try {
@@ -207,9 +216,10 @@ export function MeetingModePanel({
         language: "pt",
       });
       if (r.text?.trim()) {
+        const speaker = source === "microphone" ? "Você" : "Reunião";
         await window.desktopApi.appendMeetingTranscript({
           sessionId: sid,
-          text: `${r.text.trim()} `,
+          text: `[${speaker}] ${r.text.trim()}\n`,
         });
       }
     } catch {
@@ -217,25 +227,44 @@ export function MeetingModePanel({
     }
   }
 
+  async function handleCapturedChunk(chunkBase64: string, source: CaptureSource): Promise<void> {
+    const sid = activeSessionIdRef.current;
+    if (sid) {
+      void window.desktopApi.saveMeetingAudioChunk({
+        sessionId: sid,
+        chunkBase64,
+        extension: "webm",
+        kind: "meeting",
+      });
+    }
+    await transcribeChunk(chunkBase64, source);
+  }
+
   async function startCaptureChunks(mode: string): Promise<void> {
-    const controller = await startChunkedCapture({
-      mode,
+    // Fora do modo só-microfone captura as duas pontas: você (mic) e a reunião (saída do sistema).
+    if (mode === "microphone") {
+      const controller = await startChunkedCapture({
+        mode,
+        timesliceMs: 8000,
+        onChunk: (chunkBase64) => handleCapturedChunk(chunkBase64, "microphone"),
+      });
+      captureRef.current = controller;
+      setMicStream(controller.stream);
+      return;
+    }
+
+    const dual = await startDualChunkedCapture({
       timesliceMs: 8000,
-      onChunk: async (chunkBase64) => {
-        const sid = activeSessionIdRef.current;
-        if (sid) {
-          void window.desktopApi.saveMeetingAudioChunk({
-            sessionId: sid,
-            chunkBase64,
-            extension: "webm",
-            kind: "meeting",
-          });
-        }
-        await transcribeChunk(chunkBase64);
-      },
+      onChunk: handleCapturedChunk,
     });
-    captureRef.current = controller;
-    setCaptureStream(controller.stream);
+    captureRef.current = dual;
+    setMicStream(dual.micStream);
+    setSystemStream(dual.systemStream);
+    if (dual.micError) {
+      setPreflightStatus(`Gravando só a saída do sistema — microfone indisponível: ${dual.micError}`);
+    } else if (dual.systemError) {
+      setPreflightStatus(`Gravando só o microfone — saída do sistema indisponível: ${dual.systemError}`);
+    }
   }
 
   async function runAudioPreflight(modeOverride?: string): Promise<boolean> {
@@ -578,7 +607,15 @@ export function MeetingModePanel({
 
       {meetingSessionId && (
         <>
-          <AudioCaptureHud level={captureLevel} compact />
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {micStream && <AudioCaptureHud level={micLevel} compact />}
+            {systemStream && <AudioCaptureHud level={systemLevel} compact />}
+            {!micStream && !systemStream && (
+              <p style={{ color: C.warn, fontSize: 11, margin: 0 }}>
+                Nenhuma fonte de áudio ativa — verifique Configurações → Captura áudio.
+              </p>
+            )}
+          </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               type="button"
