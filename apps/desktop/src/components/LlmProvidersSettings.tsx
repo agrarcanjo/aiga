@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { LlmCloudProviderId, LlmSettingsPublic } from "@clone-perssua/shared-types";
 
 const MODEL_OPTIONS: Record<LlmCloudProviderId, string[]> = {
-  gemini: ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"],
+  gemini: ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"],
   openai: ["gpt-4o-mini", "gpt-4o", "o4-mini"],
   anthropic: ["claude-3-5-haiku-latest", "claude-sonnet-4-20250514"],
 };

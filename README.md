@@ -174,7 +174,7 @@ Bootstrap inicial do monorepo para o MVP desktop.
 
 Variaveis principais:
 - `DESKTOP_LOG_LEVEL`: debug | info | warn | error
-- `GEMINI_MODEL`: modelo cloud no boot (ex.: gemini-2.5-flash)
+- `GEMINI_MODEL`: modelo cloud no boot (ex.: gemini-3.5-flash)
 - `FEATURE_PROVIDER_MODE`: cloud | local | hybrid
 - `FEATURE_LOCAL_PROVIDER_ENABLED`: true | false
 - `FEATURE_FORCE_LOCAL_ONLY`: true | false
@@ -222,7 +222,7 @@ Variaveis principais:
 - A integracao Gemini roda no main process e faz streaming incremental de resposta para o renderer.
 - A API key deve ser configurada no painel Settings da UI.
 - O modelo pode ser sobrescrito por variavel de ambiente:
-	- GEMINI_MODEL=gemini-2.0-flash
+	- GEMINI_MODEL=gemini-3.5-flash
 - Se a API key estiver ausente ou o modo local-only estiver ativo, o stream retorna erro acionavel na timeline do ASK.
 
 ## ProviderRouter e LocalProvider

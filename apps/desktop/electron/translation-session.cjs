@@ -39,6 +39,27 @@ function createTranslationSession(dependencies) {
 
   let session = null;
   let recording = false;
+  const lastErrorEmitAt = new Map();
+
+  // Textos de diagnostico do STT (stub/fallback) nao sao fala do usuario.
+  function isDiagnosticSttText(text) {
+    return /^\s*\[(local|cloud):/i.test(text) || /fallback stub/i.test(text);
+  }
+
+  function emitError(code, message) {
+    const now = Date.now();
+    const last = lastErrorEmitAt.get(code) || 0;
+    if (now - last < 15000) {
+      return;
+    }
+    lastErrorEmitAt.set(code, now);
+    emitRendererEvent("translation:error", {
+      sessionId: session?.id || "",
+      code,
+      message,
+      emittedAtIso: new Date().toISOString()
+    });
+  }
 
   async function collectLlmText(input) {
     let fullText = "";
@@ -80,7 +101,7 @@ function createTranslationSession(dependencies) {
     }
 
     const latencyMs = Math.max(0, Date.now() - chunkStartedAt);
-    let translatedText = originalText;
+    let translatedText = "";
     const flags = getEffectiveFlags ? getEffectiveFlags() : {};
     const forceLocal = Boolean(flags.forceLocalOnly);
     const prompt = buildTranslatePrompt(
@@ -103,20 +124,33 @@ function createTranslationSession(dependencies) {
           ask: prompt
         });
       } catch (error) {
-        logger.warn("Translation cloud failed", {
-          message: error instanceof Error ? error.message : String(error)
-        });
-        translatedText = `[falha traducao] ${originalText}`;
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn("Translation cloud failed", { message });
+        const modelGone =
+          /no longer available|model not found|not found for api version/i.test(message);
+        emitError(
+          modelGone ? "TRANSLATION_MODEL_UNAVAILABLE" : "TRANSLATION_CLOUD_FAILED",
+          modelGone
+            ? "Modelo de traducao indisponivel no provedor. Atualize o modelo em Configuracoes > Provedores IA (rota 'translation')."
+            : `Falha na traducao pelo provedor cloud: ${message}`
+        );
+        return;
       }
     } else if (localProvider?.isAvailable?.()) {
       try {
         translatedText = await collectLocalText(prompt, session.id);
       } catch (error) {
-        logger.warn("Translation local failed", {
-          message: error instanceof Error ? error.message : String(error)
-        });
-        translatedText = originalText;
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn("Translation local failed", { message });
+        emitError("TRANSLATION_LOCAL_FAILED", `Falha na traducao pelo provedor local: ${message}`);
+        return;
       }
+    } else {
+      emitError(
+        "TRANSLATION_PROVIDER_UNAVAILABLE",
+        "Nenhum provedor de traducao disponivel. Configure uma API key ou habilite o provider local."
+      );
+      return;
     }
 
     if (!translatedText.trim()) {
@@ -169,12 +203,20 @@ function createTranslationSession(dependencies) {
         effectiveFlags
       });
       if (result?.text?.trim()) {
+        if (isDiagnosticSttText(result.text)) {
+          logger.warn("Translation STT returned diagnostic stub", { text: result.text.slice(0, 160) });
+          emitError(
+            "STT_STUB_ACTIVE",
+            `Transcricao local indisponivel: ${result.text.trim()}. Reinstale o runtime em Configuracoes > Traducao.`
+          );
+          return;
+        }
         await processText(result.text, started);
       }
     } catch (error) {
-      logger.warn("Translation STT chunk failed", {
-        message: error instanceof Error ? error.message : String(error)
-      });
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("Translation STT chunk failed", { message });
+      emitError("STT_CHUNK_FAILED", `Falha ao transcrever o audio: ${message}`);
     }
   }
 

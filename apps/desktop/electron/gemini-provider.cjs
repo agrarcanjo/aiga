@@ -8,7 +8,7 @@ const { buildGeminiParts } = require("./llm-parts-builder.cjs");
  */
 function createGeminiProvider(options) {
   const logger = options.logger;
-  const fallbackModel = options.modelName || process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const fallbackModel = options.modelName || process.env.GEMINI_MODEL || "gemini-3.5-flash";
 
   async function streamAskResponse(input) {
     const modelName = input.modelId || fallbackModel;

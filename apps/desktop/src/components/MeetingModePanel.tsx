@@ -11,7 +11,6 @@ import { MeetingWizard, type MeetingWizardValues } from "./MeetingWizard";
 import { AudioCaptureHud, useMicrophoneLevel } from "./AudioCaptureHud";
 import {
   startChunkedCapture,
-  testCaptureSource,
   type ChunkedCaptureController,
 } from "../lib/systemAudioCapture";
 
@@ -242,12 +241,9 @@ export function MeetingModePanel({
   async function runAudioPreflight(modeOverride?: string): Promise<boolean> {
     setPreflightStatus("");
     const mode = modeOverride || captureMode;
-    const test = await testCaptureSource(mode, mode === "microphone" ? 1200 : 3000);
-    if (!test.ok && test.peakDbFs <= -89) {
-      setError(`${test.message} Ajuste em Configurações → Captura áudio.`);
-      return false;
-    }
-    setPreflightStatus(test.message);
+    setPreflightStatus(
+      mode === "microphone" ? "Abrindo microfone…" : "Abrindo captura da saída do sistema…"
+    );
     return true;
   }
 

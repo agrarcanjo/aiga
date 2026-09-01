@@ -221,7 +221,7 @@ function toActionableChatError(error) {
     return {
       errorCode: "MODEL_NOT_AVAILABLE",
       errorMessage: rawMessage,
-      actionableMessage: "Modelo Gemini indisponível. Atualize GEMINI_MODEL em Settings ou no .env para gemini-2.5-flash.",
+      actionableMessage: "Modelo Gemini indisponível. Atualize o modelo em Configurações → Provedores IA (ou GEMINI_MODEL no .env) para gemini-3.5-flash.",
       retryable: false
     };
   }
@@ -434,7 +434,7 @@ function setupIpcHandlers(dependencies) {
 
       const askRoute = llmProviderRegistry
         ? llmProviderRegistry.resolveRoute("ask")
-        : { providerId: "gemini", modelId: "gemini-2.5-flash" };
+        : { providerId: "gemini", modelId: "gemini-3.5-flash" };
       const apiKey =
         askRoute.providerId === "local"
           ? ""

@@ -10,7 +10,6 @@ import {
 } from "./AudioCaptureHud";
 import {
   startChunkedCapture,
-  testCaptureSource,
   type ChunkedCaptureController,
 } from "../lib/systemAudioCapture";
 
@@ -36,6 +35,25 @@ const LANG_OPTIONS: { value: TranslationLanguageCode; label: string }[] = [
 ];
 
 const TARGET_OPTIONS = LANG_OPTIONS.filter((o) => o.value !== "auto");
+
+function Spinner(): JSX.Element {
+  return (
+    <>
+      <style>{"@keyframes aiga-spin { to { transform: rotate(360deg); } }"}</style>
+      <span
+        style={{
+          width: 12,
+          height: 12,
+          border: "2px solid rgba(255,255,255,0.35)",
+          borderTopColor: "#fff",
+          borderRadius: "50%",
+          display: "inline-block",
+          animation: "aiga-spin 0.8s linear infinite",
+        }}
+      />
+    </>
+  );
+}
 
 interface TranslationModePanelProps {
   stealthEnabled: boolean;
@@ -66,6 +84,8 @@ export function TranslationModePanel({
   const [maxLatencyMs, setMaxLatencyMs] = useState(0);
   const [linesEmitted, setLinesEmitted] = useState(0);
   const [error, setError] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [copyStatus, setCopyStatus] = useState("");
   const [preflightStatus, setPreflightStatus] = useState("");
 
   const captureRef = useRef<ChunkedCaptureController | null>(null);
@@ -131,6 +151,9 @@ export function TranslationModePanel({
       setLines((prev) => [line, ...prev].slice(0, prefs.historyLines || 8));
       setAvgLatencyMs(line.latencyMs);
     });
+    const unsubError = window.desktopApi.onTranslationError((ev) => {
+      setError(`${ev.code}: ${ev.message}`);
+    });
     const poll = setInterval(() => {
       void window.desktopApi.getTranslationSessionStatus().then((st) => {
         setActive(st.active);
@@ -141,6 +164,7 @@ export function TranslationModePanel({
     }, 3000);
     return () => {
       unsub();
+      unsubError();
       clearInterval(poll);
     };
   }, [loadPrefs, prefs.historyLines]);
@@ -161,15 +185,7 @@ export function TranslationModePanel({
 
   async function runPreflight(): Promise<boolean> {
     setPreflightStatus("");
-    const capture = await ensureCaptureReady();
-    const test = await testCaptureSource(capture.mode, capture.mode === "microphone" ? 1200 : 3000);
-    if (!test.ok && test.peakDbFs <= -89) {
-      setError(
-        `${test.message} Ajuste a fonte em Configurações → Captura áudio.`
-      );
-      return false;
-    }
-    setPreflightStatus(test.message);
+    await ensureCaptureReady();
     return true;
   }
 
@@ -199,15 +215,23 @@ export function TranslationModePanel({
   }
 
   async function handleStart(): Promise<void> {
+    if (starting || active) {
+      return;
+    }
     setError("");
     setLines([]);
     if (!consent) {
       setError("Confirme o aviso legal antes de iniciar a tradução.");
       return;
     }
-    if (!(await runPreflight())) return;
+    setStarting(true);
+    setPreflightStatus("Preparando captura de áudio…");
     try {
+      if (!(await runPreflight())) {
+        return;
+      }
       await window.desktopApi.saveSettings({ translationPrefs: prefs });
+      setPreflightStatus("Iniciando sessão de tradução…");
       const started = await window.desktopApi.startTranslationSession({
         sourceLanguage: prefs.sourceLanguage,
         targetLanguage: prefs.targetLanguage,
@@ -218,6 +242,7 @@ export function TranslationModePanel({
       setActive(true);
       try {
         await startCaptureChunks(started.captureMode || captureMode);
+        setPreflightStatus("Captura ativa. Aguardando fala…");
       } catch (captureError) {
         await window.desktopApi.stopTranslationSession();
         setActive(false);
@@ -225,6 +250,8 @@ export function TranslationModePanel({
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao iniciar tradução");
+    } finally {
+      setStarting(false);
     }
   }
 
@@ -385,18 +412,23 @@ export function TranslationModePanel({
           </label>
           <button
             type="button"
-            disabled={!consent}
+            disabled={!consent || starting}
             onClick={() => void handleStart()}
             style={{
-              background: consent ? C.accent : C.surface2,
+              background: consent && !starting ? C.accent : C.surface2,
               border: "none",
               color: "#fff",
               padding: "10px 16px",
               borderRadius: 6,
-              cursor: consent ? "pointer" : "not-allowed",
+              cursor: consent && !starting ? "pointer" : "not-allowed",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
             }}
           >
-            Iniciar legendas
+            {starting && <Spinner />}
+            {starting ? "Iniciando…" : "Iniciar legendas"}
           </button>
         </>
       )}
@@ -422,6 +454,40 @@ export function TranslationModePanel({
         <p style={{ color: C.live, fontSize: 11, margin: 0 }}>{preflightStatus}</p>
       )}
 
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button
+          type="button"
+          onClick={() => {
+            void (async () => {
+              const text = lines
+                .slice()
+                .reverse()
+                .map((l) => (l.originalText ? `${l.originalText}\n${l.translatedText}` : l.translatedText))
+                .join("\n\n");
+              try {
+                await navigator.clipboard.writeText(text);
+                setCopyStatus("Legendas copiadas.");
+              } catch {
+                setCopyStatus("Não foi possível copiar. Selecione o texto abaixo.");
+              }
+            })();
+          }}
+          disabled={lines.length === 0}
+          style={{
+            background: C.surface2,
+            border: `1px solid ${C.border}`,
+            color: lines.length === 0 ? C.textMuted : C.text,
+            padding: "6px 10px",
+            borderRadius: 6,
+            fontSize: 11,
+            cursor: lines.length === 0 ? "not-allowed" : "pointer",
+          }}
+        >
+          Copiar legendas
+        </button>
+        {copyStatus && <span style={{ color: C.textMuted, fontSize: 11 }}>{copyStatus}</span>}
+      </div>
+
       <div
         style={{
           background: `rgba(26,26,26,${prefs.overlayOpacity})`,
@@ -434,6 +500,9 @@ export function TranslationModePanel({
           overflowY: "auto",
           fontSize: expanded ? Math.max(prefs.overlayFontSize, 15) : prefs.overlayFontSize,
           lineHeight: 1.45,
+          userSelect: "text",
+          WebkitUserSelect: "text",
+          cursor: "text",
         }}
       >
         {lines.length === 0 && (

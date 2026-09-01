@@ -205,5 +205,10 @@ contextBridge.exposeInMainWorld("desktopApi", {
     const wrapped = (_event, payload) => listener(payload);
     ipcRenderer.on("translation:line", wrapped);
     return () => ipcRenderer.removeListener("translation:line", wrapped);
+  },
+  onTranslationError: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("translation:error", wrapped);
+    return () => ipcRenderer.removeListener("translation:error", wrapped);
   }
 });

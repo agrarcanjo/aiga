@@ -6,7 +6,8 @@ const {
   DEFAULT_LLM_ROUTING,
   DEFAULT_TOKEN_BUDGET,
   DEFAULT_PRIVACY,
-  DEFAULT_LLM_PROVIDERS
+  DEFAULT_LLM_PROVIDERS,
+  replaceDeprecatedModelId
 } = require("./llm-defaults.cjs");
 const {
   DEFAULT_CODE_LANGUAGE,
@@ -163,7 +164,7 @@ function createSettingsStore() {
     try {
       const fileContent = fs.readFileSync(settingsPath, "utf-8");
       const parsed = JSON.parse(fileContent);
-      return {
+      const merged = {
         ...DEFAULT_SETTINGS,
         ...parsed,
         shortcuts: {
@@ -230,9 +231,24 @@ function createSettingsStore() {
           ...(parsed.translationPrefs || {})
         }
       };
+      return migrateDeprecatedModels(merged);
     } catch {
       return { ...DEFAULT_SETTINGS };
     }
+  }
+
+  function migrateDeprecatedModels(settings) {
+    for (const provider of Object.values(settings.llmProviders || {})) {
+      if (provider?.defaultModelId) {
+        provider.defaultModelId = replaceDeprecatedModelId(provider.defaultModelId);
+      }
+    }
+    for (const route of Object.values(settings.llmRouting || {})) {
+      if (route?.modelId) {
+        route.modelId = replaceDeprecatedModelId(route.modelId);
+      }
+    }
+    return settings;
   }
 
   function migrateLegacyGeminiKey(raw) {

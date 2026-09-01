@@ -126,7 +126,8 @@ export const IPC_CHANNELS = {
   translationSessionStop: "translation:session:stop",
   translationSessionStatus: "translation:session:status",
   translationChunkIngest: "translation:chunk:ingest",
-  translationLine: "translation:line"
+  translationLine: "translation:line",
+  translationError: "translation:error"
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -587,6 +588,13 @@ export interface SettingsResetResponse {
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
+export interface TranslationErrorEvent {
+  sessionId: string;
+  code: string;
+  message: string;
+  emittedAtIso: string;
+}
+
 export interface ContentProtectionStatus {
   enabled: boolean;
   platformSupported: boolean;
@@ -846,4 +854,5 @@ export interface DesktopApi {
   getTranslationSessionStatus(): Promise<TranslationSessionStatusResponse>;
   ingestTranslationMicChunk(payload: { chunkBase64: string }): Promise<{ ok: boolean }>;
   onTranslationLine(listener: (payload: TranslationLineEvent) => void): () => void;
+  onTranslationError(listener: (payload: TranslationErrorEvent) => void): () => void;
 }
