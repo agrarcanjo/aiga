@@ -512,6 +512,9 @@ export function App(): JSX.Element {
     );
     const audioIds = pendingAudioId ? [pendingAudioId] : [];
     await submitAsk(askText, pendingScreenshotIds, previewUrls, audioIds);
+    // Depois do envio, devolve a interação à aplicação que estava atrás do
+    // overlay. O AIGA permanece visível e always-on-top.
+    void window.desktopApi.releaseWindowFocus();
   }
 
   function handleAskKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -536,6 +539,10 @@ export function App(): JSX.Element {
 
   function handleMinimize(): void {
     void window.desktopApi.minimizeWindow();
+  }
+
+  function handleReleaseFocus(): void {
+    void window.desktopApi.releaseWindowFocus();
   }
 
   // ── Derived ──────────────────────────────────────────────────────────────
@@ -796,6 +803,16 @@ export function App(): JSX.Element {
 
             {/* Separator */}
             <span style={{ width: 1, background: C.border, alignSelf: "stretch", margin: "4px 2px" }} />
+
+            {/* Libera o foco sem minimizar ou ocultar o agente. */}
+            <button
+              type="button"
+              title="Liberar foco para a aplicação ao fundo"
+              style={iconBtn()}
+              onClick={handleReleaseFocus}
+            >
+              ↘
+            </button>
 
             {/* Minimize — hidden in stealth mode (window cannot be recovered after minimize) */}
             {!stealthEnabled && (

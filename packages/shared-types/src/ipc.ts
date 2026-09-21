@@ -105,6 +105,7 @@ export const IPC_CHANNELS = {
   autoUpdateRollback: "auto-update:rollback",
   autoUpdateConfirmHealth: "auto-update:confirm-health",
   autoUpdateEvent: "auto-update:event",
+  windowReleaseFocus: "window:release-focus",
   llmSettingsGet: "llm:settings:get",
   llmSettingsSave: "llm:settings:save",
   llmProviderTest: "llm:providers:test",
@@ -738,6 +739,7 @@ export interface DesktopApi {
   confirmAutoUpdateHealth(): Promise<AutoUpdateConfirmHealthResponse>;
   quitApp(): Promise<void>;
   minimizeWindow(): Promise<void>;
+  releaseWindowFocus(): Promise<{ released: boolean }>;
   setWindowOpacity(opacity: number): Promise<{ opacity: number }>;
   setWindowLayout(layout: "chat" | "settings" | "expanded"): Promise<{
     layout: "chat" | "settings" | "expanded";

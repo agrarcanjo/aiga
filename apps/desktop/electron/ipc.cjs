@@ -1294,6 +1294,23 @@ function setupIpcHandlers(dependencies) {
     logger.debug("IPC window:minimize");
   });
 
+  ipcMain.handle("window:release-focus", () => {
+    const win =
+      (getMainWindow && getMainWindow()) ||
+      BrowserWindow.getFocusedWindow() ||
+      BrowserWindow.getAllWindows()[0];
+    if (!win || win.isDestroyed()) {
+      return { released: false };
+    }
+
+    // O Windows só permite uma janela com foco de teclado. blur() devolve o
+    // foco para a janela anteriormente ativa sem ocultar nem minimizar o AIGA.
+    // A janela continua always-on-top e volta a aceitar entrada no próximo clique.
+    win.blur();
+    logger.debug("IPC window:release-focus");
+    return { released: true };
+  });
+
   ipcMain.handle("window:set-opacity", (_event, payload) => {
     const opacity = z.number().min(0.05).max(1).parse(payload?.opacity ?? 1);
     // Persiste para re-usar na próxima ativação do stealth

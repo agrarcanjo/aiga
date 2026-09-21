@@ -89,6 +89,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   },
   quitApp: () => ipcRenderer.invoke("app:quit"),
   minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
+  releaseWindowFocus: () => ipcRenderer.invoke("window:release-focus"),
   setWindowOpacity: (opacity) => ipcRenderer.invoke("window:set-opacity", { opacity }),
   setWindowLayout: (layout) => ipcRenderer.invoke("window:set-layout", { layout }),
   listAudioSources: () => ipcRenderer.invoke("audio:sources:list"),
