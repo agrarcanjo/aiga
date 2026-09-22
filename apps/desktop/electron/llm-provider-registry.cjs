@@ -1,4 +1,6 @@
 // Routes LLM requests to gemini | openai | anthropic | local by feature
+const { resolveSmartRoute } = require("./smart-model-router.cjs");
+const { listModelCatalog } = require("./model-catalog.cjs");
 
 function createLlmProviderRegistry(dependencies) {
   const logger = dependencies.logger;
@@ -9,7 +11,16 @@ function createLlmProviderRegistry(dependencies) {
   const localProvider = dependencies.localProvider;
   const tokenUsageTracker = dependencies.tokenUsageTracker;
 
-  function resolveRoute(feature) {
+  function resolveRoute(feature, input = {}) {
+    if (input.routeOverride) {
+      return input.routeOverride;
+    }
+    if (feature === "ask") {
+      return resolveSmartRoute(settingsStore.getPublicLlmSettings(), {
+        ...input,
+        localAvailable: localProvider?.isAvailable?.() !== false
+      });
+    }
     const routing = settingsStore.getLlmRouting();
     return routing[feature] || routing.ask;
   }
@@ -20,7 +31,7 @@ function createLlmProviderRegistry(dependencies) {
 
   async function streamForFeature(input) {
     const feature = input.feature || "ask";
-    const route = resolveRoute(feature);
+    const route = resolveRoute(feature, input);
     const requestId = input.requestId;
     const sessionId = input.sessionId || requestId;
 
@@ -59,7 +70,14 @@ function createLlmProviderRegistry(dependencies) {
       ...input,
       apiKey,
       modelId: route.modelId,
-      onUsage
+      onUsage,
+      onEvent: (event) => input.onEvent({
+        ...event,
+        providerId: route.providerId,
+        modelId: route.modelId,
+        selectionProfile: route.profile || input.selectionProfile,
+        taskKind: route.taskKind || input.taskKind
+      })
     };
 
     logger.info("LlmProviderRegistry route", {
@@ -86,8 +104,8 @@ function createLlmProviderRegistry(dependencies) {
     return streamForFeature({ ...input, feature: "meetingSummary" });
   }
 
-  async function testProvider(providerId, modelId) {
-    const apiKey = getApiKey(providerId);
+  async function testProvider(providerId, modelId, candidateApiKey) {
+    const apiKey = candidateApiKey?.trim() || getApiKey(providerId);
     if (!apiKey) {
       throw new Error("API key ausente.");
     }
@@ -100,12 +118,22 @@ function createLlmProviderRegistry(dependencies) {
     return geminiProvider.testConnection(apiKey, modelId);
   }
 
+  async function listProviderModels(providerId, candidateApiKey) {
+    const apiKey = candidateApiKey?.trim() || getApiKey(providerId);
+    if (!apiKey) throw new Error("API key ausente.");
+    if (providerId === "openai" && typeof openaiProvider.listModels === "function") {
+      return openaiProvider.listModels(apiKey);
+    }
+    return listModelCatalog().filter((model) => model.providerId === providerId).map((model) => model.modelId);
+  }
+
   return {
     streamAskResponse,
     streamMeetingSummary,
     streamForFeature,
     testProvider,
-    resolveRoute
+    resolveRoute,
+    listProviderModels
   };
 }
 

@@ -2,7 +2,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
-const { app, desktopCapturer, screen } = require("electron");
+const { app, BrowserWindow, desktopCapturer, ipcMain, screen } = require("electron");
 
 const MAX_QUEUE_LENGTH = 10;
 const CAPTURE_HIDE_SETTLE_MS = 150;
@@ -47,6 +47,93 @@ function resolveTargetDisplays(screenCapture) {
   return [primary];
 }
 
+function selectRegionOnDisplay(display, thumbnail) {
+  return new Promise((resolve, reject) => {
+    const requestId = randomUUID();
+    let settled = false;
+    const overlay = new BrowserWindow({
+      x: display.bounds.x,
+      y: display.bounds.y,
+      width: display.bounds.width,
+      height: display.bounds.height,
+      frame: false,
+      transparent: false,
+      backgroundColor: "#111111",
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      show: false,
+      webPreferences: {
+        preload: path.join(__dirname, "region-selection-preload.cjs"),
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true
+      }
+    });
+
+    // O overlay precisa aparecer localmente para permitir a seleção. A imagem
+    // usada como fundo já foi capturada antes da criação desta janela.
+    overlay.setContentProtection(false);
+    overlay.setAlwaysOnTop(true, "screen-saver");
+
+    function cleanup() {
+      ipcMain.removeListener("region-selection:ready", onReady);
+      ipcMain.removeListener("region-selection:complete", onComplete);
+      ipcMain.removeListener("region-selection:cancel", onCancel);
+    }
+
+    function finish(value, error) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (!overlay.isDestroyed()) overlay.close();
+      if (error) reject(error);
+      else resolve(value);
+    }
+
+    function matches(payload) {
+      return payload?.requestId === requestId;
+    }
+
+    function onReady(event, payload) {
+      if (!matches(payload)) return;
+      event.sender.send("region-selection:background", thumbnail.toDataURL());
+      overlay.show();
+      overlay.focus();
+    }
+
+    function onComplete(_event, payload) {
+      if (!matches(payload)) return;
+      finish(normalizeCropRegion(payload.region));
+    }
+
+    function onCancel(_event, payload) {
+      if (!matches(payload)) return;
+      const error = new Error("Seleção de área cancelada.");
+      error.code = "REGION_SELECTION_CANCELLED";
+      finish(null, error);
+    }
+
+    ipcMain.on("region-selection:ready", onReady);
+    ipcMain.on("region-selection:complete", onComplete);
+    ipcMain.on("region-selection:cancel", onCancel);
+    overlay.on("closed", () => {
+      if (!settled) {
+        const error = new Error("Seleção de área cancelada.");
+        error.code = "REGION_SELECTION_CANCELLED";
+        finish(null, error);
+      }
+    });
+    overlay.loadFile(path.join(__dirname, "region-selection.html"), {
+      query: { requestId }
+    }).catch((error) => finish(null, error));
+  });
+}
+
 function findSourceForDisplay(sources, display) {
   const byId = sources.find((source) => source.display_id === String(display.id));
   if (byId) {
@@ -64,6 +151,32 @@ function findSourceForDisplay(sources, display) {
       labelHints.some((hint) => source.name.toLowerCase().includes(hint.toLowerCase()))
     ) || null
   );
+}
+
+function normalizeCropRegion(region) {
+  const raw = region || {};
+  const x = Math.min(0.9, Math.max(0, Number(raw.x) || 0));
+  const y = Math.min(0.9, Math.max(0, Number(raw.y) || 0));
+  const width = Math.min(1 - x, Math.max(0.1, Number(raw.width) || 1 - x));
+  const height = Math.min(1 - y, Math.max(0.1, Number(raw.height) || 1 - y));
+  const rounded = (value) => Math.round(value * 1_000_000) / 1_000_000;
+  return { x: rounded(x), y: rounded(y), width: rounded(width), height: rounded(height) };
+}
+
+function cropThumbnail(thumbnail, region) {
+  if (!thumbnail || typeof thumbnail.getSize !== "function" || typeof thumbnail.crop !== "function") {
+    return thumbnail;
+  }
+  const size = thumbnail.getSize();
+  if (!size?.width || !size?.height) {
+    return thumbnail;
+  }
+  const normalized = normalizeCropRegion(region);
+  const x = Math.min(size.width - 1, Math.round(normalized.x * size.width));
+  const y = Math.min(size.height - 1, Math.round(normalized.y * size.height));
+  const width = Math.max(1, Math.min(size.width - x, Math.round(normalized.width * size.width)));
+  const height = Math.max(1, Math.min(size.height - y, Math.round(normalized.height * size.height)));
+  return thumbnail.crop({ x, y, width, height });
 }
 
 function createScreenshotService(options) {
@@ -140,7 +253,10 @@ function createScreenshotService(options) {
 
     const createdAtIso = new Date().toISOString();
     const trigger = payload.trigger || "manual";
-    const sourceKind = payload.source || "full";
+    const interactiveArea = screenCapture.mode === "area";
+    const configuredCropEnabled = Boolean(screenCapture.cropEnabled);
+    const configuredCropRegion = normalizeCropRegion(screenCapture.cropRegion);
+    const sourceKind = interactiveArea || configuredCropEnabled ? "region" : payload.source || "full";
     const capturedItems = [];
 
     for (const display of targetDisplays) {
@@ -162,8 +278,27 @@ function createScreenshotService(options) {
 
       const captureId = randomUUID();
       const imagePath = path.join(capturesDir, `${captureId}.png`);
-      const pngBuffer = preferredSource.thumbnail.toPNG();
+      const cropRegion = interactiveArea
+        ? await selectRegionOnDisplay(display, preferredSource.thumbnail)
+        : configuredCropRegion;
+      const cropEnabled = interactiveArea || configuredCropEnabled;
+      const capturedImage = cropEnabled
+        ? cropThumbnail(preferredSource.thumbnail, cropRegion)
+        : preferredSource.thumbnail;
+      const capturedSize =
+        typeof capturedImage.getSize === "function" ? capturedImage.getSize() : undefined;
+      const originalSize =
+        typeof preferredSource.thumbnail.getSize === "function"
+          ? preferredSource.thumbnail.getSize()
+          : undefined;
+      const pngBuffer = capturedImage.toPNG();
       fs.writeFileSync(imagePath, pngBuffer);
+      const originalPixels = originalSize?.width && originalSize?.height
+        ? originalSize.width * originalSize.height
+        : undefined;
+      const capturedPixels = capturedSize?.width && capturedSize?.height
+        ? capturedSize.width * capturedSize.height
+        : undefined;
 
       const item = {
         captureId,
@@ -171,9 +306,19 @@ function createScreenshotService(options) {
         createdAtIso,
         source: sourceKind,
         trigger,
-        previewDataUrl: preferredSource.thumbnail.toDataURL(),
+        previewDataUrl: capturedImage.toDataURL(),
         displayId: String(display.id),
-        displayLabel: display.id === screen.getPrimaryDisplay().id ? "Tela principal" : `Tela ${display.id}`
+        displayLabel: display.id === screen.getPrimaryDisplay().id ? "Tela principal" : `Tela ${display.id}`,
+        imageWidth: capturedSize?.width,
+        imageHeight: capturedSize?.height,
+        originalWidth: originalSize?.width,
+        originalHeight: originalSize?.height,
+        encodedBytes: pngBuffer.length,
+        pixelReductionPercent:
+          originalPixels && capturedPixels
+            ? Math.round((1 - capturedPixels / originalPixels) * 1000) / 10
+            : undefined,
+        cropRegion: cropEnabled ? cropRegion : undefined
       };
 
       enqueueItem(item);
@@ -189,6 +334,10 @@ function createScreenshotService(options) {
       trigger,
       source: sourceKind,
       mode: screenCapture.mode,
+      cropEnabled: interactiveArea || configuredCropEnabled,
+      cropRegion: capturedItems[0].cropRegion,
+      encodedBytes: capturedItems[0].encodedBytes,
+      pixelReductionPercent: capturedItems[0].pixelReductionPercent,
       displayCount: capturedItems.length,
       queueSize: queue.length
     });
@@ -230,5 +379,8 @@ function createScreenshotService(options) {
 module.exports = {
   createScreenshotService,
   listDisplays,
-  resolveTargetDisplays
+  resolveTargetDisplays,
+  normalizeCropRegion,
+  cropThumbnail,
+  selectRegionOnDisplay
 };

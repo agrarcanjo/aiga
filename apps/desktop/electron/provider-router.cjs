@@ -47,6 +47,18 @@ function createProviderRouter(dependencies) {
     const hasApiKey = Boolean(input.apiKey);
     const strategy = resolveStrategy(input.effectiveFlags, hasApiKey);
 
+    // Uma rota explícita escolhida pelo seletor inteligente/personalizado não
+    // precisa passar pelo classificador local. Somente forceLocalOnly tem
+    // precedência por representar uma restrição de privacidade.
+    if (
+      llmProviderRegistry &&
+      input.routeOverride?.providerId &&
+      input.routeOverride.providerId !== "local" &&
+      !input.effectiveFlags.forceLocalOnly
+    ) {
+      return llmProviderRegistry.streamAskResponse(input);
+    }
+
     logger.info("ProviderRouter resolved strategy", {
       requestId: input.requestId,
       strategy,

@@ -9,6 +9,7 @@ const { buildPromptWithPreset, getPromptPresets } = require("./prompt-presets.cj
 const { applyStealthFromSettings } = require("./stealth-profile.cjs");
 const { applyWindowLayout } = require("./window-layout.cjs");
 const { listMeetingTemplates, applyTemplateToSessionInput } = require("./meeting-templates.cjs");
+const { listModelCatalog } = require("./model-catalog.cjs");
 
 const pingRequestSchema = z.object({
   timestampIso: z.string().datetime().optional()
@@ -23,7 +24,9 @@ const chatAskRequestSchema = z.object({
   ask: z.string().max(10000).optional().default(""),
   screenshotIds: z.array(z.string().min(1)).optional(),
   audioIds: z.array(z.string().min(1)).optional(),
-  presetId: z.string().min(1).optional()
+  presetId: z.string().min(1).optional(),
+  selectionProfile: z.enum(["auto", "light", "balanced", "high", "custom"]).optional(),
+  taskKind: z.enum(["simple_text", "complex_reasoning", "code", "screenshot_general", "screenshot_code", "screenshot_error", "aws_exam_screenshot", "audio_question", "meeting_summary", "meeting_classifier", "translation"]).optional()
 });
 
 const audioAddRequestSchema = z.object({
@@ -55,12 +58,36 @@ const audioCaptureSaveSchema = z.object({
 });
 
 const screenCaptureSaveSchema = z.object({
-  mode: z.enum(["primary", "all_displays", "specific_display"]).optional(),
-  displayId: z.string().max(128).optional()
+  mode: z.enum(["primary", "all_displays", "specific_display", "area"]).optional(),
+  displayId: z.string().max(128).optional(),
+  cropEnabled: z.boolean().optional(),
+  cropRegion: z
+    .object({
+      x: z.number().min(0).max(1),
+      y: z.number().min(0).max(1),
+      width: z.number().min(0.1).max(1),
+      height: z.number().min(0.1).max(1)
+    })
+    .optional()
+});
+
+const conversationSaveSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  messages: z.array(z.object({
+    id: z.string(), requestId: z.string(), role: z.enum(["user", "assistant"]),
+    content: z.string(), createdAtIso: z.string(), status: z.string(),
+    linkedScreenshotIds: z.array(z.string()).default([]),
+    linkedScreenshotPreviewUrls: z.array(z.string()).optional(),
+    linkedAudioIds: z.array(z.string()).optional(), linkedAudioDuration: z.number().optional(),
+    providerId: z.string().optional(), modelId: z.string().optional(),
+    selectionProfile: z.string().optional(), actionableMessage: z.string().optional(),
+    errorCode: z.string().optional()
+  })).max(2000)
 });
 
 const settingsSaveRequestSchema = z.object({
   language: z.string().min(2).max(20).optional(),
+  quickScreenshotAnalysis: z.boolean().optional(),
   selectedAudioInputDeviceId: z.string().max(256).nullable().optional(),
   selectedAudioInputDeviceLabel: z.string().max(256).nullable().optional(),
   shortcuts: z
@@ -127,7 +154,8 @@ const llmSettingsSaveSchema = z.object({
     .optional(),
   routing: z.record(z.any()).optional(),
   tokenBudget: z.record(z.any()).optional(),
-  privacy: z.record(z.any()).optional()
+  privacy: z.record(z.any()).optional(),
+  selection: z.record(z.any()).optional()
 });
 
 const meetingTemplateIdSchema = z.enum([
@@ -176,7 +204,8 @@ const translationMicChunkSchema = z.object({
 
 const llmProviderTestSchema = z.object({
   providerId: z.enum(["gemini", "openai", "anthropic"]),
-  modelId: z.string().optional()
+  modelId: z.string().optional(),
+  apiKey: z.string().max(2048).optional()
 });
 
 const audioSourceTestSchema = z.object({
@@ -283,6 +312,8 @@ function setupIpcHandlers(dependencies) {
   const logger = dependencies?.logger || createNoopLogger();
   const settingsStore = dependencies?.settingsStore;
   const screenshotService = dependencies?.screenshotService;
+  const conversationArchiveService = dependencies?.conversationArchiveService;
+  const llamaServerManager = dependencies?.llamaServerManager;
   const audioQueue = dependencies?.audioQueue;
   const shortcutService = dependencies?.shortcutService;
   const providerRouter = dependencies?.providerRouter;
@@ -432,33 +463,6 @@ function setupIpcHandlers(dependencies) {
       const env = getEnvironmentConfig();
       const resolvedFlags = resolveFeatureFlags(settingsStore.getFeatureFlags(), env);
 
-      const askRoute = llmProviderRegistry
-        ? llmProviderRegistry.resolveRoute("ask")
-        : { providerId: "gemini", modelId: "gemini-3.5-flash" };
-      const apiKey =
-        askRoute.providerId === "local"
-          ? ""
-          : settingsStore.getProviderApiKey(askRoute.providerId) || settingsStore.getGeminiApiKey();
-
-      if (
-        askRoute.providerId !== "local" &&
-        !apiKey &&
-        resolvedFlags.effective.providerMode === "cloud" &&
-        !resolvedFlags.effective.localProviderEnabled &&
-        !resolvedFlags.effective.forceLocalOnly
-      ) {
-        emitRendererEvent("chat:stream-event", {
-          requestId,
-          status: "error",
-          errorCode: "MISSING_API_KEY",
-          errorMessage: `API key nao configurada para ${askRoute.providerId}.`,
-          actionableMessage: "Abra Configuracoes > Provedores de IA e salve a chave do provedor ativo.",
-          retryable: false,
-          createdAtIso: new Date().toISOString()
-        });
-        return;
-      }
-
       const availableScreenshots = screenshotService.getQueue();
       const selectedScreenshots = parsed.screenshotIds?.length
         ? availableScreenshots.filter((item) => parsed.screenshotIds.includes(item.captureId))
@@ -468,6 +472,7 @@ function setupIpcHandlers(dependencies) {
       const selectedAudios = parsed.audioIds?.length
         ? availableAudios.filter((item) => parsed.audioIds.includes(item.audioId))
         : [];
+      conversationArchiveService?.stageAttachments(parsed.sessionId, selectedScreenshots, selectedAudios);
 
       const promptBuild = buildPromptWithPreset({
         ask: parsed.ask || "",
@@ -490,10 +495,26 @@ function setupIpcHandlers(dependencies) {
         return;
       }
 
+      const askRoute = llmProviderRegistry
+        ? llmProviderRegistry.resolveRoute("ask", {
+            ask: parsed.ask,
+            presetId: promptBuild.presetId,
+            hasScreenshots: selectedScreenshots.length > 0,
+            hasAudio: selectedAudios.length > 0,
+            selectionProfile: parsed.selectionProfile,
+            taskKind: parsed.taskKind
+          })
+        : { providerId: "gemini", modelId: "gemini-3.5-flash" };
+      const apiKey =
+        askRoute.providerId === "local" ? "" : settingsStore.getProviderApiKey(askRoute.providerId);
+
       try {
         await providerRouter.streamAskResponse({
           requestId,
           apiKey: resolvedFlags.effective.forceLocalOnly ? "" : apiKey,
+          routeOverride: askRoute,
+          taskKind: askRoute.taskKind,
+          selectionProfile: askRoute.profile,
           effectiveFlags: resolvedFlags.effective,
           ask: promptBuild.prompt,
           screenshots: selectedScreenshots,
@@ -1075,7 +1096,9 @@ function setupIpcHandlers(dependencies) {
   });
 
   ipcMain.handle("llm:settings:get", async () => ({
-    llm: settingsStore.getPublicLlmSettings()
+    llm: settingsStore.getPublicLlmSettings(),
+    catalog: listModelCatalog(),
+    localRuntime: llamaServerManager?.getStatus?.() || { state: "unavailable", binaryPath: "", modelPath: "", lastError: "Runtime local indisponível." }
   }));
 
   ipcMain.handle("llm:settings:save", async (_event, payload) => {
@@ -1096,7 +1119,7 @@ function setupIpcHandlers(dependencies) {
       const route = settingsStore.getLlmRouting();
       const modelId =
         parsed.modelId || settingsStore.getPublicLlmSettings().providers[parsed.providerId].defaultModelId;
-      await llmProviderRegistry.testProvider(parsed.providerId, modelId);
+      await llmProviderRegistry.testProvider(parsed.providerId, modelId, parsed.apiKey);
       return { ok: true, message: "Conexao OK.", testedAtIso: new Date().toISOString() };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha no teste";
@@ -1292,6 +1315,30 @@ function setupIpcHandlers(dependencies) {
     const win = (getMainWindow && getMainWindow()) || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
     if (win && !win.isDestroyed()) win.minimize();
     logger.debug("IPC window:minimize");
+  });
+
+  ipcMain.handle("llm:providers:models", async (_event, payload) => {
+    const providerId = z.enum(["gemini", "openai", "anthropic"]).parse(payload?.providerId);
+    const apiKey = z.string().max(2048).optional().parse(payload?.apiKey);
+    if (!llmProviderRegistry) return { ok: false, providerId, modelIds: [], message: "Registry de providers indisponível.", fetchedAtIso: new Date().toISOString() };
+    try {
+      const modelIds = await llmProviderRegistry.listProviderModels(providerId, apiKey);
+      return { ok: true, providerId, modelIds, fetchedAtIso: new Date().toISOString() };
+    } catch (error) {
+      return {
+        ok: false,
+        providerId,
+        modelIds: [],
+        message: error instanceof Error ? error.message : "Falha ao consultar modelos.",
+        fetchedAtIso: new Date().toISOString()
+      };
+    }
+  });
+
+  ipcMain.handle("conversation:save", async (_event, payload) => {
+    const parsed = conversationSaveSchema.parse(payload);
+    if (!conversationArchiveService) throw new Error("Serviço de arquivo de conversas indisponível.");
+    return conversationArchiveService.saveConversation(parsed);
   });
 
   ipcMain.handle("window:release-focus", () => {

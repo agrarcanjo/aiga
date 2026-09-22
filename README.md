@@ -204,6 +204,10 @@ Variaveis principais:
 - Valor inicial padrao: Ctrl+E.
 - Cada captura gera um arquivo PNG temporario em userData/captures e entra na fila da UI.
 - A UI mostra preview das ultimas capturas e permite limpar a fila.
+- Em **Configuracoes → Captura tela → Captura de area**, o AIGA se oculta e mostra um overlay
+  escurecido no monitor principal. Arraste para selecionar a regiao ou pressione `Esc` para cancelar.
+- A selecao interativa e a regiao percentual persistente recortam o `NativeImage` antes de gerar o
+  PNG/Base64, reduzindo pixels e bytes enviados ao provider.
 
 ## Fluxo ASK
 
@@ -236,6 +240,11 @@ Variaveis principais:
 	- `prefer-local-fallback-cloud`
 - O `LocalProvider` atual e um stub com streaming incremental para desacoplar a UI do backend Gemini e preparar a integracao futura com llama-server.
 - Em `hybrid`, quando o provider local estiver habilitado, o roteador tenta local primeiro e pode cair para cloud se houver API key disponivel.
+- **Configuracoes → IA e modelos** unifica credenciais, catálogo e estratégia. O composer oferece
+  Auto, Leve, Balanceado, Alto e Personalizado junto ao microfone e ao botão de envio.
+- O Auto classifica a atividade localmente, sem uma chamada extra de IA, e seleciona somente modelos
+  compatíveis com a modalidade. Screenshots explicitamente identificados como questões AWS usam tier Alto.
+- O modo Personalizado aceita um modelo fixo ou uma atividade predefinida.
 
 ## Modo privacidade local-only
 

@@ -55,13 +55,15 @@ function createShortcutService(options) {
         source: "full",
         trigger: "shortcut"
       });
+      const quickAnalysis = settingsStore.getPublicSettings().quickScreenshotAnalysis !== false;
       if (typeof emitRendererEvent === "function") {
         const items = Array.isArray(item.items) && item.items.length > 0 ? item.items : [item];
         emitRendererEvent("screenshot:quick-analyze", {
           captureId: item.captureId,
           previewDataUrl: item.previewDataUrl,
           captureIds: items.map((entry) => entry.captureId),
-          previewDataUrls: items.map((entry) => entry.previewDataUrl)
+          previewDataUrls: items.map((entry) => entry.previewDataUrl),
+          autoAnalyze: quickAnalysis
         });
       }
     } catch (error) {

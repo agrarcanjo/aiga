@@ -62,7 +62,10 @@ function createLocalProvider(options) {
   }
 
   return {
-    isAvailable: () => true,
+    isAvailable: () => {
+      const status = llamaServerManager?.getStatus?.();
+      return Boolean(status?.binaryPath && status?.modelPath);
+    },
     streamAskResponse
   };
 }

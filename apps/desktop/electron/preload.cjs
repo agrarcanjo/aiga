@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   removeAudio: (payload) => ipcRenderer.invoke("audio:remove", payload),
   getPromptPresets: () => ipcRenderer.invoke("prompt:presets:get"),
   submitAsk: (payload) => ipcRenderer.invoke("chat:ask", payload),
+  saveConversation: (payload) => ipcRenderer.invoke("conversation:save", payload),
   onChatStreamEvent: (listener) => {
     const wrappedListener = (_event, payload) => listener(payload);
     ipcRenderer.on(chatStreamEventChannel, wrappedListener);
@@ -140,6 +141,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   getLlmSettings: () => ipcRenderer.invoke("llm:settings:get"),
   saveLlmSettings: (payload) => ipcRenderer.invoke("llm:settings:save", payload),
   testLlmProvider: (payload) => ipcRenderer.invoke("llm:providers:test", payload),
+  listLlmProviderModels: (providerId, apiKey) => ipcRenderer.invoke("llm:providers:models", { providerId, apiKey }),
   getTokenUsageSession: (sessionId) => ipcRenderer.invoke("usage:tokens:session", { sessionId }),
   getTokenUsageDaily: () => ipcRenderer.invoke("usage:tokens:daily"),
   listMeetingTemplates: () => ipcRenderer.invoke("meeting:templates:list"),

@@ -39,11 +39,11 @@ Esses modos compartilham provedores de IA, runtime local, controle de privacidad
 | Categoria | IDs | Capacidades principais |
 |---|---|---|
 | Chat e respostas | CHAT-01…10 | ASK, streaming, histórico, erro acionável, reenvio, presets e guardrails |
-| Tela e visão | VIS-01…09 | captura global, múltiplos monitores, fila, preview e análise automática |
+| Tela e visão | VIS-01…11 | captura global, região útil interativa, múltiplos monitores, fila, preview e análise automática |
 | Áudio e transcrição | AUD-01…12 | gravação, fontes, medição, loopback, arquivo, FFmpeg e Whisper |
 | Reuniões | MEET-01…17 | wizard, modos, transcrição, resumo, alertas, bookmarks, templates e memória |
 | Tradução | TRN-01…11 | tradução contínua, idiomas, overlay, latência e exclusão mútua |
-| IA e roteamento | LLM-01…12 | Gemini/OpenAI/Anthropic/local, rotas, teste, fallback e orçamento |
+| IA e roteamento | LLM-01…15 | Gemini/OpenAI/Anthropic/local, perfis inteligentes, catálogo, rotas, fallback e orçamento |
 | Contexto | CTX-01…05 | perfis pessoais e memória editável do time |
 | Privacidade e stealth | PRV-01…11 | always-on-top, full stealth, content protection, consentimento e retenção |
 | Configuração e UX | UX-01…13 | modos, opacidade, layout, foco reflexivo, atalhos, idioma de código e setup |
@@ -77,6 +77,8 @@ Esses modos compartilham provedores de IA, runtime local, controle de privacidad
 | VIS-07 | Análise rápida automática | Após capturar, envia imediatamente “analise a tela” com o preset especializado; pode ser desligada para edição prévia do pedido. | Implementada | `quickAnalysis`; `onQuickAnalyze` |
 | VIS-08 | Análise visual especializada | Classifica conteúdo em algoritmo, questão objetiva/teórica, erro, UI/UX, documento ou outro; adapta estrutura, linguagem e nível de detalhe. | Implementada | preset `screenshot-analysis` |
 | VIS-09 | Limpeza de fila | Remove as capturas temporárias enfileiradas por comando IPC. | Implementada | `screenshot:queue:clear` |
+| VIS-10 | Região útil de captura | Permite recortar uma região percentual persistente antes de salvar/enviar, com prévia proporcional, ajuste de margens/tamanho e preset para remover barras do navegador e do Windows. Registra dimensões, bytes e redução de pixels para medição. | Implementada | `ScreenCaptureSettings.tsx`; `screenshot-service.cjs` |
+| VIS-11 | Captura de área interativa | No monitor principal, oculta o AIGA, congela e escurece a tela, permite selecionar por arraste e recorta a imagem antes do envio. `Esc` cancela e restaura o estado anterior. | Implementada | `region-selection-preload.cjs`; `screenshot-service.cjs` |
 
 ## 6. Áudio, fontes e transcrição
 
@@ -149,6 +151,9 @@ Esses modos compartilham provedores de IA, runtime local, controle de privacidad
 | LLM-10 | ModelManager | Resolve, baixa e valida modelos por SHA-256; degrada sem travar a UI. | Condicional: URL/rede/checksum | `model-manager.cjs` |
 | LLM-11 | Orçamento por sessão | Avisa em 50 mil tokens e possui limite hard padrão de 200 mil; ação pode avisar, bloquear cloud ou migrar para local. | Implementada | `token-usage-tracker.cjs`; defaults |
 | LLM-12 | Uso diário | Agrega tokens de entrada/saída por data e informa extrapolação do limite diário quando definido. | Implementada | `usage:tokens:daily` |
+| LLM-13 | Perfis de seleção | Auto, Leve, Balanceado, Alto e Personalizado podem ser escolhidos na configuração ou diretamente no composer. | Implementada | `smart-model-router.cjs`; `App.tsx` |
+| LLM-14 | Auto por atividade | Classifica localmente texto, código, screenshot, erro, áudio e questão AWS, aplica tier e filtra capacidades sem chamada extra de IA. | Implementada | `smart-model-router.cjs` |
+| LLM-15 | Catálogo e disponibilidade | Exibe descrições curadas dos modelos e permite cruzá-las com IDs disponíveis para a conta do provider. | Implementada | `model-catalog.cjs`; `llm:providers:models` |
 
 ## 10. Contexto e memória
 

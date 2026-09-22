@@ -6,6 +6,7 @@ const {
   DEFAULT_LLM_ROUTING,
   DEFAULT_TOKEN_BUDGET,
   DEFAULT_PRIVACY,
+  DEFAULT_MODEL_SELECTION,
   DEFAULT_LLM_PROVIDERS,
   replaceDeprecatedModelId
 } = require("./llm-defaults.cjs");
@@ -25,26 +26,35 @@ function encryptSecret(plain) {
   }
   try {
     if (safeStorage.isEncryptionAvailable()) {
-      return safeStorage.encryptString(plain).toString("base64");
+      return `safe:v1:${safeStorage.encryptString(plain).toString("base64")}`;
     }
   } catch {
-    return "";
+    // Em ambientes de desenvolvimento o Electron pode reportar suporte antes
+    // do cofre do SO estar utilizável. Preserve a chave com o fallback legado.
   }
-  return Buffer.from(plain, "utf-8").toString("base64");
+  return `plain:v1:${Buffer.from(plain, "utf-8").toString("base64")}`;
 }
 
 function decryptSecret(encoded) {
   if (!encoded) {
     return "";
   }
-  const encryptedBuffer = Buffer.from(encoded, "base64");
+  if (encoded.startsWith("plain:v1:")) {
+    return Buffer.from(encoded.slice("plain:v1:".length), "base64").toString("utf-8");
+  }
+  const safeEncoded = encoded.startsWith("safe:v1:")
+    ? encoded.slice("safe:v1:".length)
+    : encoded;
+  const encryptedBuffer = Buffer.from(safeEncoded, "base64");
   try {
     if (safeStorage.isEncryptionAvailable()) {
       return safeStorage.decryptString(encryptedBuffer);
     }
   } catch {
-    return "";
+    if (encoded.startsWith("safe:v1:")) return "";
   }
+  // Compatibilidade com chaves antigas codificadas em base64 quando o
+  // safeStorage ainda não estava disponível.
   return encryptedBuffer.toString("utf-8");
 }
 
@@ -81,6 +91,7 @@ function normalizeAudioCapture(partial) {
 
 const DEFAULT_SETTINGS = {
   language: "pt-BR",
+  quickScreenshotAnalysis: true,
   defaultCodeLanguage: DEFAULT_CODE_LANGUAGE,
   nonStealthModeEnabled: false,
   selectedAudioInputDeviceId: "",
@@ -95,10 +106,13 @@ const DEFAULT_SETTINGS = {
   llmRouting: { ...DEFAULT_LLM_ROUTING },
   tokenBudget: { ...DEFAULT_TOKEN_BUDGET },
   privacy: { ...DEFAULT_PRIVACY },
+  modelSelection: { ...DEFAULT_MODEL_SELECTION },
   audioCapture: { ...DEFAULT_SETTINGS_AUDIO_CAPTURE },
   screenCapture: {
     mode: "primary",
-    displayId: ""
+    displayId: "",
+    cropEnabled: false,
+    cropRegion: { x: 0, y: 0, width: 1, height: 1 }
   },
   transcriptionPacks: {
     installedLanguageIds: [],
@@ -207,6 +221,14 @@ function createSettingsStore() {
           ...DEFAULT_SETTINGS.privacy,
           ...(parsed.privacy || {})
         },
+        modelSelection: {
+          ...DEFAULT_MODEL_SELECTION,
+          ...(parsed.modelSelection || {}),
+          customRoute: {
+            ...DEFAULT_MODEL_SELECTION.customRoute,
+            ...(parsed.modelSelection?.customRoute || {})
+          }
+        },
         audioCapture: {
           ...DEFAULT_SETTINGS.audioCapture,
           ...(parsed.audioCapture || {})
@@ -290,6 +312,7 @@ function createSettingsStore() {
     }
     return {
       language: raw.language,
+      quickScreenshotAnalysis: raw.quickScreenshotAnalysis !== false,
       defaultCodeLanguage: normalizeCodeLanguage(raw.defaultCodeLanguage),
       nonStealthModeEnabled: Boolean(raw.nonStealthModeEnabled),
       selectedAudioInputDeviceId: raw.selectedAudioInputDeviceId || undefined,
@@ -415,7 +438,15 @@ function createSettingsStore() {
       },
       routing: { ...migrated.llmRouting },
       tokenBudget: { ...migrated.tokenBudget },
-      privacy: { ...migrated.privacy }
+      privacy: { ...migrated.privacy },
+      selection: {
+        ...DEFAULT_MODEL_SELECTION,
+        ...(migrated.modelSelection || {}),
+        customRoute: {
+          ...DEFAULT_MODEL_SELECTION.customRoute,
+          ...(migrated.modelSelection?.customRoute || {})
+        }
+      }
     };
   }
 
@@ -567,8 +598,11 @@ function createSettingsStore() {
         if (p.defaultModelId) {
           next.llmProviders[pid].defaultModelId = p.defaultModelId;
         }
-        if (Object.prototype.hasOwnProperty.call(p, "apiKey")) {
-          next.llmProviders[pid].apiKeyEncrypted = p.apiKey ? encryptSecret(p.apiKey) : "";
+        // `undefined` significa preservar a chave existente. Somente `null` ou
+        // string vazia representam uma remoção explícita.
+        if (Object.prototype.hasOwnProperty.call(p, "apiKey") && p.apiKey !== undefined) {
+          const normalizedKey = typeof p.apiKey === "string" ? p.apiKey.trim() : "";
+          next.llmProviders[pid].apiKeyEncrypted = normalizedKey ? encryptSecret(normalizedKey) : "";
           if (pid === "gemini") {
             next.geminiApiKeyEncrypted = next.llmProviders[pid].apiKeyEncrypted;
           }
@@ -587,6 +621,18 @@ function createSettingsStore() {
       }
       if (partial.llm.privacy) {
         next.privacy = { ...DEFAULT_PRIVACY, ...next.privacy, ...partial.llm.privacy };
+      }
+      if (partial.llm.selection) {
+        next.modelSelection = {
+          ...DEFAULT_MODEL_SELECTION,
+          ...(next.modelSelection || {}),
+          ...partial.llm.selection,
+          customRoute: {
+            ...DEFAULT_MODEL_SELECTION.customRoute,
+            ...(next.modelSelection?.customRoute || {}),
+            ...(partial.llm.selection.customRoute || {})
+          }
+        };
       }
     }
 
@@ -620,7 +666,8 @@ function createSettingsStore() {
       llmProviders: { ...DEFAULT_LLM_PROVIDERS },
       llmRouting: { ...DEFAULT_LLM_ROUTING },
       tokenBudget: { ...DEFAULT_TOKEN_BUDGET },
-      privacy: { ...DEFAULT_PRIVACY }
+      privacy: { ...DEFAULT_PRIVACY },
+      modelSelection: { ...DEFAULT_MODEL_SELECTION }
     });
     return getPublicSettings();
   }

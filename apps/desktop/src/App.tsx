@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type {
   ChatStreamEvent,
+  ModelSelectionProfile,
   ScreenshotQueueItem,
   StealthStateChangedEvent,
 } from "@clone-perssua/shared-types";
@@ -13,7 +14,7 @@ import { TranslationModePanel } from "./components/TranslationModePanel";
 
 // ─── Constantes ─────────────────────────────────────────────────────────────
 
-const DEFAULT_SCREENSHOT_PROMPT = "analise a tela";
+const DEFAULT_SCREENSHOT_PROMPT = "Analise todas as capturas anexadas em conjunto como partes do mesmo contexto.";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,10 @@ interface ChatMessage {
   linkedScreenshotIds: string[];
   linkedScreenshotPreviewUrls: string[];
   linkedAudioDuration?: number;
+  linkedAudioIds?: string[];
+  providerId?: string;
+  modelId?: string;
+  selectionProfile?: string;
 }
 
 type AppMode = "chat" | "meeting" | "translation";
@@ -83,6 +88,7 @@ export function App(): JSX.Element {
   const [screenshotQueue, setScreenshotQueue] = useState<ScreenshotQueueItem[]>([]);
   const [pendingScreenshotIds, setPendingScreenshotIds] = useState<string[]>([]);
   const [quickAnalysis, setQuickAnalysis] = useState(true);
+  const quickAnalysisRef = useRef(true);
 
   // ── Stealth + LLM + opacity ─────────────────────────────────────────────
   const [stealthEnabled, setStealthEnabled] = useState(true);
@@ -94,6 +100,8 @@ export function App(): JSX.Element {
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("general");
   const [appMode, setAppMode] = useState<AppMode>("chat");
   const [chatExpanded, setChatExpanded] = useState(false);
+  const [selectionProfile, setSelectionProfile] = useState<ModelSelectionProfile>("auto");
+  const [conversationSaveStatus, setConversationSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   // ── Settings — Resources ─────────────────────────────────────────────────
   const [selectToPrompt, setSelectToPrompt] = useState(false);
@@ -136,7 +144,12 @@ export function App(): JSX.Element {
         Array.isArray(p.previewDataUrls) && p.previewDataUrls.length > 0
           ? p.previewDataUrls
           : [p.previewDataUrl];
-      void submitAsk(DEFAULT_SCREENSHOT_PROMPT, captureIds, previewDataUrls);
+      if (p.autoAnalyze ?? quickAnalysisRef.current) {
+        void submitAsk(DEFAULT_SCREENSHOT_PROMPT, captureIds, previewDataUrls);
+      } else {
+        setPendingScreenshotIds((current) => [...new Set([...current, ...captureIds])]);
+        setAskText((current) => current || DEFAULT_SCREENSHOT_PROMPT);
+      }
     });
 
     // Probe de dispositivos de audio sem solicitar permissao
@@ -207,9 +220,31 @@ export function App(): JSX.Element {
   async function loadSettings(): Promise<void> {
     try {
       const r = await window.desktopApi.getSettings();
+      const quick = r.settings.quickScreenshotAnalysis !== false;
+      quickAnalysisRef.current = quick;
+      setQuickAnalysis(quick);
       setCaptureShortcut(r.settings.shortcuts.captureScreen);
       setPushToTalkShortcut(r.settings.shortcuts.pushToTalk);
-      setHasLlm(r.settings.hasGeminiApiKey);
+      const llm = await window.desktopApi.getLlmSettings();
+      const configuredProviders = Object.entries(llm.llm.providers)
+        .filter(([, provider]) => provider.enabled && provider.hasApiKey);
+      if (configuredProviders.length === 0) {
+        setHasLlm(false);
+      } else {
+        const health = await Promise.all(configuredProviders.map(async ([providerId, provider]) => {
+          try {
+            const result = await window.desktopApi.testLlmProvider({
+              providerId: providerId as "gemini" | "openai" | "anthropic",
+              modelId: provider.defaultModelId,
+            });
+            return result.ok;
+          } catch {
+            return false;
+          }
+        }));
+        setHasLlm(health.some(Boolean));
+      }
+      setSelectionProfile(llm.llm.selection.profile);
     } catch { /* silent */ }
   }
 
@@ -252,6 +287,9 @@ export function App(): JSX.Element {
             retryable: payload.retryable,
             linkedScreenshotIds: [],
             linkedScreenshotPreviewUrls: [],
+            providerId: payload.providerId,
+            modelId: payload.modelId,
+            selectionProfile: payload.selectionProfile,
           },
         ];
       }
@@ -270,6 +308,9 @@ export function App(): JSX.Element {
               errorCode: payload.errorCode,
               actionableMessage: payload.actionableMessage,
               retryable: payload.retryable,
+              providerId: payload.providerId || m.providerId,
+              modelId: payload.modelId || m.modelId,
+              selectionProfile: payload.selectionProfile || m.selectionProfile,
             }
       );
     });
@@ -463,6 +504,7 @@ export function App(): JSX.Element {
       linkedScreenshotIds: [...screenshotIds],
       linkedScreenshotPreviewUrls: previewUrls ?? [],
       linkedAudioDuration: audioIds?.length ? pendingAudioDuration : undefined,
+      linkedAudioIds: audioIds ? [...audioIds] : [],
     };
     setChatMessages((m) => [...m, userMsg]);
     try {
@@ -472,6 +514,7 @@ export function App(): JSX.Element {
         screenshotIds: screenshotIds.length > 0 ? screenshotIds : undefined,
         audioIds: audioIds?.length ? audioIds : undefined,
         presetId: undefined,
+        selectionProfile,
       });
       // Patch requestId on the user message
       setChatMessages((m) =>
@@ -539,6 +582,33 @@ export function App(): JSX.Element {
 
   function handleMinimize(): void {
     void window.desktopApi.minimizeWindow();
+  }
+
+  async function handleSaveConversation(): Promise<void> {
+    if (chatMessages.length === 0 || isSubmitting || conversationSaveStatus === "saving") return;
+    setConversationSaveStatus("saving");
+    try {
+      await window.desktopApi.saveConversation({ sessionId, messages: chatMessages });
+      setConversationSaveStatus("saved");
+      globalThis.setTimeout(() => setConversationSaveStatus("idle"), 3000);
+    } catch {
+      setConversationSaveStatus("error");
+    }
+  }
+
+  async function handleQuickAnalysisChange(enabled: boolean): Promise<void> {
+    quickAnalysisRef.current = enabled;
+    setQuickAnalysis(enabled);
+    try {
+      await window.desktopApi.saveSettings({ quickScreenshotAnalysis: enabled });
+    } catch { /* a próxima carga restaura o valor persistido */ }
+  }
+
+  async function handleSelectionProfileChange(profile: ModelSelectionProfile): Promise<void> {
+    setSelectionProfile(profile);
+    try {
+      await window.desktopApi.saveLlmSettings({ selection: { profile } });
+    } catch { /* mantém seleção local durante a sessão */ }
   }
 
   function handleReleaseFocus(): void {
@@ -620,7 +690,7 @@ export function App(): JSX.Element {
             {/* LLM status */}
             <button
               type="button"
-              title={hasLlm ? "LLM configurado" : "Nenhuma LLM configurada — clique para configurar"}
+              title={hasLlm ? "LLM configurada e validada" : "Nenhuma LLM configurada e funcionando — clique para verificar"}
               style={iconBtn()}
               onClick={() => {
                 setSettingsTab("ia");
@@ -642,6 +712,25 @@ export function App(): JSX.Element {
               </span>
             </button>
 
+            <button
+              type="button"
+              title={conversationSaveStatus === "saved"
+                ? "Conversa salva em Documentos/AIGA/Conversas"
+                : conversationSaveStatus === "error"
+                ? "Falha ao salvar a conversa"
+                : "Salvar conversa completa, imagens e áudios"}
+              aria-label="Salvar conversa"
+              disabled={chatMessages.length === 0 || isSubmitting || conversationSaveStatus === "saving"}
+              style={{
+                ...iconBtn(conversationSaveStatus === "saved"),
+                opacity: chatMessages.length === 0 || isSubmitting ? 0.35 : 1,
+                color: conversationSaveStatus === "error" ? C.error : conversationSaveStatus === "saved" ? C.success : undefined,
+              }}
+              onClick={() => void handleSaveConversation()}
+            >
+              💾
+            </button>
+
             {/* Screenshot */}
             <button
               type="button"
@@ -652,40 +741,23 @@ export function App(): JSX.Element {
               📷
             </button>
 
-            {/* Microphone — only in chat (reunião/entrevista usam captura de sistema) */}
-            {appMode === "chat" && (
-              !audioReady ? (
-                <button
-                  type="button"
-                  title="Microfone não configurado — clique para configurar"
-                  style={{ ...iconBtn(), opacity: 0.4 }}
-                  onClick={() => { setSettingsTab("microphone"); setSettingsOpen(true); }}
-                >
-                  🎤️
-                </button>
-              ) : isRecording ? (
-                <button
-                  type="button"
-                  title="Parar gravação"
-                  style={{ ...iconBtn(), display: "flex", alignItems: "center", gap: 3, color: C.error }}
-                  onClick={() => stopRecording()}
-                >
-                  <span style={{ fontSize: 10 }}>🔴</span>
-                  <span style={{ fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
-                    {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}
-                  </span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  title={`Gravar áudio (${pushToTalkShortcut})`}
-                  style={iconBtn()}
-                  onClick={() => void toggleRecording()}
-                >
-                  🎤️
-                </button>
-              )
-            )}
+            <button
+              type="button"
+              title={quickAnalysis
+                ? "Envio automático ativado — clique para acumular screenshots"
+                : "Acúmulo de screenshots ativado — clique para enviar automaticamente"}
+              aria-label="Alternar envio automático de screenshots"
+              aria-pressed={quickAnalysis}
+              style={{
+                ...iconBtn(quickAnalysis),
+                fontSize: 13,
+                border: `1px solid ${quickAnalysis ? C.accent : C.border}`,
+                padding: "3px 6px",
+              }}
+              onClick={() => void handleQuickAnalysisChange(!quickAnalysis)}
+            >
+              {quickAnalysis ? "⚡" : "＋"}
+            </button>
 
             {/* Modo reunião */}
             <button
@@ -849,7 +921,7 @@ export function App(): JSX.Element {
             selectToPrompt={selectToPrompt}
             onSelectToPromptChange={setSelectToPrompt}
             quickAnalysis={quickAnalysis}
-            onQuickAnalysisChange={setQuickAnalysis}
+            onQuickAnalysisChange={(enabled) => void handleQuickAnalysisChange(enabled)}
             onSettingsChanged={() => void loadSettings()}
           />
         ) : appMode === "meeting" ? (
@@ -974,6 +1046,11 @@ export function App(): JSX.Element {
                         ? ""
                         : "")}
                   </span>
+                  {msg.role === "assistant" && msg.modelId && (
+                    <div style={{ marginTop: 5, color: C.textDim, fontSize: 9 }}>
+                      {msg.providerId} · {msg.modelId} · {msg.selectionProfile || "configurado"}
+                    </div>
+                  )}
                   {(msg.status === "pending" ||
                     msg.status === "streaming") && (
                     <span
@@ -1111,12 +1188,10 @@ export function App(): JSX.Element {
           style={{
             padding: chatExpanded ? "12px 20px" : "8px 12px",
             borderTop: `1px solid ${C.border}`,
-            display: "flex",
-            gap: 8,
-            alignItems: "stretch",
             background: C.surface,
           }}
         >
+          <div style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 12, overflow: "hidden" }}>
           <textarea
             value={askText}
             onChange={(e) => setAskText(e.target.value)}
@@ -1125,9 +1200,9 @@ export function App(): JSX.Element {
             rows={chatExpanded ? 4 : 2}
             style={{
               flex: 1,
-              background: C.surface2,
-              border: `1px solid ${C.border}`,
-              borderRadius: 8,
+              width: "100%",
+              background: "transparent",
+              border: "none",
               color: C.text,
               padding: "8px 10px",
               fontSize: 13,
@@ -1136,35 +1211,45 @@ export function App(): JSX.Element {
               fontFamily: "inherit",
               lineHeight: 1.5,
               userSelect: "text",
-              minHeight: chatExpanded ? 96 : 56,
+              minHeight: chatExpanded ? 96 : 48,
             }}
           />
-          <button
-            type="button"
-            title="Enviar (Ctrl+Enter)"
-            disabled={isSubmitting || !askText.trim()}
-            onClick={() => void handleSendAsk()}
-            style={{
-              background:
-                isSubmitting || !askText.trim() ? C.surface2 : C.accent,
-              border: "none",
-              borderRadius: 8,
-              color:
-                isSubmitting || !askText.trim() ? C.textMuted : "#fff",
-              padding: "0 16px",
-              minWidth: 52,
-              alignSelf: "stretch",
-              cursor:
-                isSubmitting || !askText.trim() ? "not-allowed" : "pointer",
-              fontSize: 20,
-              lineHeight: 1,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            {isSubmitting ? "⟳" : "⏎"}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 7px 7px" }}>
+            <select
+              aria-label="Estratégia de modelo"
+              title="Estratégia de modelo"
+              value={selectionProfile}
+              onChange={(e) => void handleSelectionProfileChange(e.target.value as ModelSelectionProfile)}
+              style={{ background: "transparent", border: "none", color: C.textMuted, fontSize: 11, outline: "none", cursor: "pointer", maxWidth: 126 }}
+            >
+              <option value="auto">Auto</option>
+              <option value="light">Leve</option>
+              <option value="balanced">Balanceado</option>
+              <option value="high">Alto</option>
+              <option value="custom">Personalizado</option>
+            </select>
+            <span style={{ flex: 1 }} />
+            {!audioReady ? (
+              <button type="button" title="Configurar microfone" style={{ ...iconBtn(), opacity: 0.45 }} onClick={() => { setSettingsTab("microphone"); setSettingsOpen(true); }}>🎤</button>
+            ) : isRecording ? (
+              <button type="button" title="Parar gravação" style={{ ...iconBtn(), color: C.error, gap: 4 }} onClick={stopRecording}>🔴 <span style={{ fontSize: 10 }}>{String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}</span></button>
+            ) : (
+              <button type="button" title={`Gravar áudio (${pushToTalkShortcut})`} style={iconBtn()} onClick={() => void toggleRecording()}>🎤</button>
+            )}
+            <button
+              type="button"
+              title="Enviar (Ctrl+Enter)"
+              disabled={isSubmitting || (!askText.trim() && !pendingAudioId)}
+              onClick={() => void handleSendAsk()}
+              style={{
+                background: askText.trim() || pendingAudioId ? C.accent : "transparent",
+                border: "none", borderRadius: 7,
+                color: askText.trim() || pendingAudioId ? "#fff" : C.textDim,
+                width: 30, height: 28, cursor: isSubmitting ? "wait" : "pointer", fontSize: 17,
+              }}
+            >{isSubmitting ? "⟳" : "↑"}</button>
+          </div>
+          </div>
         </div>
         </>
         )}

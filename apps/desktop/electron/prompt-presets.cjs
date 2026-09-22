@@ -54,7 +54,7 @@ const PROMPT_PRESETS = [
     title: "Analise de captura rapida",
     description: "Captura rapida (Ctrl+E): responde ao que o usuario esta vendo na tela.",
     template:
-      "Voce analisa uma CAPTURA DE TELA enviada pelo usuario (captura rapida). O objetivo e ajudar com o que ele esta vendo AGORA.\n\n" +
+      "Voce analisa uma CAPTURA DE TELA ou varias CAPTURAS DE TELA enviadas pelo usuario. Trate TODAS as imagens do mesmo envio como partes de um unico contexto, respeite a ordem em que foram anexadas e combine informacoes entre elas antes de responder. Nao analise cada imagem isoladamente quando a resposta depender do conjunto. O objetivo e ajudar com toda a atividade que ele esta vendo AGORA.\n\n" +
       "LINGUAGEM PARA CODIGO — ordem de prioridade:\n" +
       "1) Se a captura ja indicar linguagem (seletor no LeetCode/HackerRank/Codeforces, aba ativa no editor, syntax highlighting, nome de arquivo .java/.py etc.), use ESSA linguagem nas solucoes.\n" +
       "2) Caso contrario, use {{DEFAULT_CODE_LANGUAGE}} (configuracao padrao do app).\n" +
@@ -92,7 +92,7 @@ const PROMPT_PRESETS = [
       "REGRAS GERAIS:\n" +
       "- Priorize CORRETUDE; declare incerteza se faltar evidencia na imagem.\n" +
       "- Nao descreva login, chrome da aplicacao AIGA ou elementos irrelevantes.\n" +
-      "- Use apenas texto e elementos visiveis na captura.\n" +
+      "- Use apenas texto e elementos visiveis no conjunto de capturas.\n" +
       "- Responda no idioma do enunciado/pergunta na imagem.\n\n" +
       "Contexto adicional do usuario (pode estar vazio): {{ASK}}"
   },

@@ -19,9 +19,18 @@ const DEFAULT_PRIVACY = {
   retentionDays: 7
 };
 
+const DEFAULT_MODEL_SELECTION = {
+  profile: "auto",
+  preferredProvider: "openai",
+  allowFallback: true,
+  customMode: "model",
+  customRoute: { providerId: "openai", modelId: "gpt-5.6-terra" },
+  customTaskKind: "screenshot_general"
+};
+
 const MODEL_CATALOG = {
   gemini: ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"],
-  openai: ["gpt-4o-mini", "gpt-4o", "o4-mini"],
+  openai: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra", "gpt-4o-mini", "gpt-4o"],
   anthropic: ["claude-3-5-haiku-latest", "claude-sonnet-4-20250514"]
 };
 
@@ -40,7 +49,7 @@ function replaceDeprecatedModelId(modelId) {
 
 const DEFAULT_LLM_PROVIDERS = {
   gemini: { enabled: true, defaultModelId: "gemini-3.5-flash", apiKeyEncrypted: "" },
-  openai: { enabled: false, defaultModelId: "gpt-4o-mini", apiKeyEncrypted: "" },
+  openai: { enabled: false, defaultModelId: "gpt-5.6-terra", apiKeyEncrypted: "" },
   anthropic: { enabled: false, defaultModelId: "claude-3-5-haiku-latest", apiKeyEncrypted: "" }
 };
 
@@ -48,6 +57,7 @@ module.exports = {
   DEFAULT_LLM_ROUTING,
   DEFAULT_TOKEN_BUDGET,
   DEFAULT_PRIVACY,
+  DEFAULT_MODEL_SELECTION,
   MODEL_CATALOG,
   DEFAULT_LLM_PROVIDERS,
   DEPRECATED_MODEL_REPLACEMENTS,

@@ -27,6 +27,7 @@ const { createContentProtectionGuard } = require("./content-protection-guard.cjs
 const { applyStealthFromSettings } = require("./stealth-profile.cjs");
 const { createLocalProvider } = require("./local-provider.cjs");
 const { createProviderRouter } = require("./provider-router.cjs");
+const { createConversationArchiveService } = require("./conversation-archive-service.cjs");
 const { createLlamaServerManager } = require("./llama-server-manager.cjs");
 const { createWhisperCliManager } = require("./whisper-cli-manager.cjs");
 const { createModelManager } = require("./model-manager.cjs");
@@ -156,6 +157,7 @@ app.whenReady().then(() => {
   const providerRouter = createProviderRouter({
     logger,
     llmProviderRegistry,
+    llamaServerManager,
     geminiProvider,
     localProvider
   });
@@ -219,6 +221,7 @@ app.whenReady().then(() => {
     settingsStore,
     transcriptionPacksService,
     ffmpegInstaller,
+    llamaServerManager,
     audioSourceEnumerator
   });
   const audioSourceValidator = createAudioSourceValidator({ logger });
@@ -330,6 +333,7 @@ app.whenReady().then(() => {
     emitRendererEvent: emitToAllWindows
   });
   const audioQueue = createAudioQueue({ logger });
+  const conversationArchiveService = createConversationArchiveService({ logger });
 
   const screenshotService = createScreenshotService({
     logger,
@@ -359,9 +363,11 @@ app.whenReady().then(() => {
     settingsStore,
     screenshotService,
     audioQueue,
+    conversationArchiveService,
     shortcutService,
     providerRouter,
     llmProviderRegistry,
+    llamaServerManager,
     tokenUsageTracker,
     meetingOrchestrator,
     translationSession,

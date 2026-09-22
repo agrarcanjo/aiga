@@ -47,7 +47,6 @@ export type SettingsTabId =
   | "general"
   | "meeting"
   | "translation"
-  | "api"
   | "ia"
   | "environment"
   | "flags"
@@ -63,8 +62,7 @@ const NAV: { id: SettingsTabId; label: string }[] = [
   { id: "general", label: "Geral" },
   { id: "meeting", label: "Reunião" },
   { id: "translation", label: "Tradução" },
-  { id: "api", label: "API Gemini" },
-  { id: "ia", label: "Provedores IA" },
+  { id: "ia", label: "IA e modelos" },
   { id: "environment", label: "Ambiente" },
   { id: "flags", label: "Feature flags" },
   { id: "audio", label: "Captura áudio" },
@@ -202,10 +200,6 @@ export function SettingsPage({
   const [defaultCodeLanguage, setDefaultCodeLanguage] = useState("java");
   const [generalStatus, setGeneralStatus] = useState("");
 
-  const [geminiApiKey, setGeminiApiKey] = useState("");
-  const [hasGeminiApiKey, setHasGeminiApiKey] = useState(false);
-  const [apiStatus, setApiStatus] = useState("");
-
   const [audioDevices, setAudioDevices] = useState<{ deviceId: string; label: string }[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
   const [savedMicLabel, setSavedMicLabel] = useState("");
@@ -237,7 +231,6 @@ export function SettingsPage({
     const r = await window.desktopApi.getSettings();
     setNonStealthModeEnabled(Boolean(r.settings.nonStealthModeEnabled));
     setDefaultCodeLanguage(r.settings.defaultCodeLanguage || "java");
-    setHasGeminiApiKey(r.settings.hasGeminiApiKey);
     setCaptureShortcut(r.settings.shortcuts.captureScreen);
     setPushToTalkShortcut(r.settings.shortcuts.pushToTalk);
     setFullStealthShortcut(r.settings.shortcuts.toggleFullStealth || "Ctrl+Shift+H");
@@ -341,15 +334,6 @@ export function SettingsPage({
       defaultCodeLanguage,
     });
     setGeneralStatus("Configurações gerais salvas.");
-    onSettingsChanged?.();
-    await load();
-    await loadChecklist();
-  }
-
-  async function saveApi(): Promise<void> {
-    await window.desktopApi.saveSettings({ geminiApiKey: geminiApiKey.trim() || null });
-    setApiStatus("API Key salva.");
-    setGeminiApiKey("");
     onSettingsChanged?.();
     await load();
     await loadChecklist();
@@ -614,7 +598,11 @@ export function SettingsPage({
 
           {tab === "ia" && (
             <div style={{ maxWidth: 640 }}>
-              <LlmProvidersSettings inputStyle={is} primaryBtn={pb} />
+              <LlmProvidersSettings
+                inputStyle={is}
+                primaryBtn={pb}
+                onSettingsChanged={onSettingsChanged}
+              />
             </div>
           )}
 
@@ -639,31 +627,6 @@ export function SettingsPage({
           {tab === "screen" && (
             <div style={{ maxWidth: 560 }}>
               <ScreenCaptureSettings inputStyle={is} primaryBtn={pb} secondaryBtn={sb} />
-            </div>
-          )}
-
-          {tab === "api" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 480 }}>
-              <span style={{ fontSize: 11, color: hasGeminiApiKey ? C.success : C.error, fontWeight: 600 }}>
-                {hasGeminiApiKey ? "✓ API Key configurada" : "✗ API Key não configurada"}
-              </span>
-              <label style={{ color: C.textMuted, fontSize: 12 }}>Gemini API Key</label>
-              <input
-                type="password"
-                placeholder="AIza…"
-                value={geminiApiKey}
-                onChange={(e) => setGeminiApiKey(e.target.value)}
-                style={is}
-              />
-              <button
-                type="button"
-                disabled={!geminiApiKey.trim()}
-                style={{ ...pb, opacity: geminiApiKey.trim() ? 1 : 0.5 }}
-                onClick={() => void saveApi()}
-              >
-                Salvar API
-              </button>
-              {apiStatus && <span style={{ color: C.success, fontSize: 12 }}>{apiStatus}</span>}
             </div>
           )}
 

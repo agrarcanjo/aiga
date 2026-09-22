@@ -4,6 +4,7 @@ function createSetupChecklistService(options) {
   const settingsStore = options.settingsStore;
   const transcriptionPacksService = options.transcriptionPacksService;
   const ffmpegInstaller = options.ffmpegInstaller;
+  const llamaServerManager = options.llamaServerManager;
 
   async function getChecklist() {
     const settings = settingsStore.getPublicSettings();
@@ -28,6 +29,9 @@ function createSetupChecklistService(options) {
       Boolean(llm?.providers?.openai?.hasApiKey) ||
       Boolean(llm?.providers?.anthropic?.hasApiKey) ||
       Boolean(settings.hasGeminiApiKey);
+    const localRuntime = llamaServerManager?.getStatus?.() || {};
+    const localReady = Boolean(localRuntime.binaryPath && localRuntime.modelPath);
+    const localRequested = llm?.selection?.profile === "auto" && llm?.selection?.preferredProvider === "local";
 
     const audioMode = settings.audioCapture?.mode || "system_loopback";
     const hasMic =
@@ -42,6 +46,17 @@ function createSetupChecklistService(options) {
         severity: "required",
         ready: hasAnyLlmKey,
         actionLabel: "Abrir Provedores IA"
+      },
+      {
+        id: "llama-runtime",
+        tab: "ia",
+        title: "Runtime local llama-server",
+        description: localReady
+          ? "Binário e modelo local disponíveis."
+          : "Opcional e usado somente no Auto. Sem ele, o Auto usa uma API configurada, que pode gerar custo.",
+        severity: "recommended",
+        ready: !localRequested || localReady,
+        actionLabel: "Abrir IA e modelos"
       },
       {
         id: "transcription",

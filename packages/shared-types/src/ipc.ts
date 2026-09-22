@@ -37,6 +37,7 @@ import type {
   TranslationSessionStopResponse
 } from "./translation";
 import type {
+  LlmCloudProviderId,
   LlmProviderTestRequest,
   LlmProviderTestResponse,
   LlmSettingsPublic,
@@ -84,6 +85,7 @@ export const IPC_CHANNELS = {
   screenshotQuickAnalyze: "screenshot:quick-analyze",
   stealthStateChanged: "stealth:state-changed",
   chatAsk: "chat:ask",
+  conversationSave: "conversation:save",
   chatStreamEvent: "chat:stream-event",
   promptPresetsGet: "prompt:presets:get",
   audioTranscribe: "audio:transcribe",
@@ -153,6 +155,15 @@ export interface ScreenshotCaptureResponse {
   source: "full" | "region";
   trigger: "manual" | "shortcut";
   previewDataUrl: string;
+  displayId?: string;
+  displayLabel?: string;
+  imageWidth?: number;
+  imageHeight?: number;
+  originalWidth?: number;
+  originalHeight?: number;
+  encodedBytes?: number;
+  pixelReductionPercent?: number;
+  cropRegion?: ScreenCaptureRegion;
 }
 
 export interface ScreenshotQueueItem extends ScreenshotCaptureResponse {}
@@ -170,11 +181,21 @@ export interface ScreenshotQueueUpdatedEvent {
   items: ScreenshotQueueItem[];
 }
 
-export type ScreenCaptureMode = "primary" | "all_displays" | "specific_display";
+export type ScreenCaptureMode = "primary" | "all_displays" | "specific_display" | "area";
+
+export interface ScreenCaptureRegion {
+  /** Coordenadas normalizadas (0..1), independentes da resolução/DPI. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 export interface ScreenCaptureSettings {
   mode: ScreenCaptureMode;
   displayId?: string;
+  cropEnabled?: boolean;
+  cropRegion?: ScreenCaptureRegion;
 }
 
 export interface DisplayInfo {
@@ -195,6 +216,7 @@ export interface ScreenshotQuickAnalyzeEvent {
   previewDataUrl: string;
   captureIds?: string[];
   previewDataUrls?: string[];
+  autoAnalyze?: boolean;
 }
 
 export interface ChatAskRequest {
@@ -203,6 +225,8 @@ export interface ChatAskRequest {
   screenshotIds?: string[];
   audioIds?: string[];
   presetId?: string;
+  selectionProfile?: import("./llm").ModelSelectionProfile;
+  taskKind?: import("./llm").LlmTaskKind;
 }
 
 export interface AudioAddRequest {
@@ -246,6 +270,25 @@ export interface ChatStreamEvent {
   actionableMessage?: string;
   retryable?: boolean;
   createdAtIso: string;
+  providerId?: string;
+  modelId?: string;
+  selectionProfile?: string;
+  taskKind?: string;
+}
+
+export interface ConversationSaveRequest {
+  sessionId: string;
+  messages: Array<{
+    id: string; requestId: string; role: "user" | "assistant"; content: string;
+    createdAtIso: string; status: string; linkedScreenshotIds: string[];
+    linkedScreenshotPreviewUrls?: string[]; linkedAudioIds?: string[];
+    linkedAudioDuration?: number; providerId?: string; modelId?: string;
+    selectionProfile?: string; actionableMessage?: string; errorCode?: string;
+  }>;
+}
+
+export interface ConversationSaveResponse {
+  saved: true; folderPath: string; htmlPath: string; savedAtIso: string;
 }
 
 export interface PromptPreset {
@@ -295,6 +338,8 @@ export interface ShortcutPushToTalkEvent {
 
 export interface AppSettings {
   language: string;
+  /** Envia a captura imediatamente para análise; quando falso, acumula no composer. */
+  quickScreenshotAnalysis: boolean;
   /** Quando true, a janela usa perfil normal (sem stealth). Padrão: false (stealth ativo). */
   nonStealthModeEnabled: boolean;
   /** Linguagem padrão para soluções de código (ex.: java). */
@@ -557,10 +602,12 @@ export interface LlmSettingsSaveRequest {
   routing?: Partial<LlmSettingsPublic["routing"]>;
   tokenBudget?: Partial<LlmSettingsPublic["tokenBudget"]>;
   privacy?: Partial<LlmSettingsPublic["privacy"]>;
+  selection?: Partial<LlmSettingsPublic["selection"]>;
 }
 
 export interface SettingsSaveRequest {
   language?: string;
+  quickScreenshotAnalysis?: boolean;
   nonStealthModeEnabled?: boolean;
   defaultCodeLanguage?: string;
   selectedAudioInputDeviceId?: string | null;
@@ -713,6 +760,7 @@ export interface DesktopApi {
   }>;
   getPromptPresets(): Promise<PromptPresetsGetResponse>;
   submitAsk(payload: ChatAskRequest): Promise<ChatAskResponse>;
+  saveConversation(payload: ConversationSaveRequest): Promise<ConversationSaveResponse>;
   onChatStreamEvent(listener: (payload: ChatStreamEvent) => void): () => void;
   addAudio(payload: AudioAddRequest): Promise<AudioAddResponse>;
   removeAudio(payload: AudioRemoveRequest): Promise<{ ok: boolean }>;
@@ -752,9 +800,35 @@ export interface DesktopApi {
   onStealthStateChanged(listener: (payload: StealthStateChangedEvent) => void): () => void;
   onPushToTalkShortcut(listener: (payload: ShortcutPushToTalkEvent) => void): () => void;
   onAutoUpdateEvent(listener: (payload: AutoUpdateEvent) => void): () => void;
-  getLlmSettings(): Promise<{ llm: LlmSettingsPublic }>;
+  getLlmSettings(): Promise<{
+    llm: LlmSettingsPublic;
+    localRuntime: {
+      state: string;
+      binaryPath?: string;
+      modelPath?: string;
+      lastError?: string;
+    };
+    catalog: Array<{
+      providerId: LlmCloudProviderId;
+      modelId: string;
+      label: string;
+      description: string;
+      tier: "light" | "balanced" | "high";
+      modalities: string[];
+      reasoning: boolean;
+      relativeLatency: "low" | "medium" | "high";
+      relativeCost: "low" | "medium" | "high";
+    }>;
+  }>;
   saveLlmSettings(payload: LlmSettingsSaveRequest): Promise<{ llm: LlmSettingsPublic; savedAtIso: string }>;
   testLlmProvider(payload: LlmProviderTestRequest): Promise<LlmProviderTestResponse>;
+  listLlmProviderModels(providerId: LlmCloudProviderId, apiKey?: string): Promise<{
+    ok: boolean;
+    providerId: LlmCloudProviderId;
+    modelIds: string[];
+    message?: string;
+    fetchedAtIso: string;
+  }>;
   getTokenUsageSession(sessionId: string): Promise<TokenUsageSessionResponse>;
   getTokenUsageDaily(): Promise<TokenUsageDailyResponse>;
   listMeetingTemplates(): Promise<MeetingTemplatesListResponse>;
