@@ -1,0 +1,18 @@
+import { build } from "vite";
+import react from "@vitejs/plugin-react";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
+const directory = path.dirname(fileURLToPath(import.meta.url));
+const root = path.join(directory, "out/ui");
+fs.mkdirSync(root, { recursive: true });
+fs.writeFileSync(path.join(root, "index.html"), '<html lang="pt-BR"><head><meta charset="UTF-8" /></head><body style="background:#171717"><div id="root"></div><script type="module" src="/entry.tsx"></script></body></html>');
+const component = path.resolve(directory, "../../src/components/CaptureCompatSettings.tsx").replaceAll("\\", "/");
+fs.writeFileSync(path.join(root, "entry.tsx"), `import React from "react"; import {createRoot} from "react-dom/client"; import {CaptureCompatSettings} from ${JSON.stringify(component)}; createRoot(document.getElementById("root")!).render(<CaptureCompatSettings buttonStyle={{padding:8}} />);`);
+await build({ configFile: false, root, base: "./", plugins: [react()], build: { outDir: "dist" } });
+const require = createRequire(import.meta.url);
+const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+const child = spawn(require("electron"), [path.join(directory, "test-ui-electron.cjs")], { env, windowsHide: true, stdio: "inherit" });
+child.on("exit", (code) => { process.exitCode = code ?? 1; });

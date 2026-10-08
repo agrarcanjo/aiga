@@ -1,0 +1,654 @@
+{
+  "startedAt": "2026-10-08T19:48:34.897Z",
+  "windows": "10.0.26300",
+  "arch": "x64",
+  "durationSeconds": 5,
+  "manifest": {
+    "arch": "x64",
+    "detours": "e4bfd6b03e50de46b47abfbd1e46b384f0c5f833",
+    "version": "1.0.0",
+    "protocol": 1,
+    "sha256": {
+      "aiga-capture-compat.dll": "0bff758de181d68fb86ecfb27b0ba2f21e280dd3106c6797bef52a5b73bde335",
+      "aiga-capture-helper.exe": "dbd2752e0cdb6d1183d4d57419222ee02c1b542fae08a3cc9e933fc480fb314a"
+    }
+  },
+  "cases": [
+    {
+      "id": "T01",
+      "name": "existing affinity cleared with real queries",
+      "result": "passed",
+      "milliseconds": 442,
+      "observations": {
+        "before": {
+          "protocol": 1,
+          "version": "1.0.0",
+          "loaded": false,
+          "initialized": false,
+          "hookActive": false,
+          "stable": false,
+          "overflow": false,
+          "error": 0,
+          "stage": "command",
+          "blocked": "0",
+          "observedAt": "0",
+          "identity": {
+            "pid": 25176,
+            "created": "134359625149032839",
+            "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+            "arch": "x64"
+          },
+          "windows": [
+            {
+              "hwnd": "14748770",
+              "threadId": 36292,
+              "className": "AigaCaptureFixture",
+              "valid": true,
+              "before": null,
+              "affinity": 17,
+              "queryError": 0,
+              "clearError": 0
+            }
+          ]
+        },
+        "after": {
+          "protocol": 1,
+          "version": "1.0.0",
+          "loaded": true,
+          "initialized": true,
+          "hookActive": true,
+          "stable": true,
+          "overflow": false,
+          "error": 0,
+          "stage": "command",
+          "blocked": "0",
+          "observedAt": "134359625157321930",
+          "identity": {
+            "pid": 25176,
+            "created": "134359625149032839",
+            "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+            "arch": "x64"
+          },
+          "windows": [
+            {
+              "hwnd": "14748770",
+              "threadId": 36292,
+              "className": "AigaCaptureFixture",
+              "valid": true,
+              "before": 17,
+              "affinity": 0,
+              "queryError": 0,
+              "clearError": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "T02",
+      "name": "repeated exclusion neutralized",
+      "result": "passed",
+      "milliseconds": 1156,
+      "observations": {
+        "protocol": 1,
+        "version": "1.0.0",
+        "loaded": true,
+        "initialized": true,
+        "hookActive": true,
+        "stable": true,
+        "overflow": false,
+        "error": 0,
+        "stage": "command",
+        "blocked": "72",
+        "observedAt": "134359625168920075",
+        "identity": {
+          "pid": 25176,
+          "created": "134359625149032839",
+          "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+          "arch": "x64"
+        },
+        "windows": [
+          {
+            "hwnd": "14748770",
+            "threadId": 36292,
+            "className": "AigaCaptureFixture",
+            "valid": true,
+            "before": 0,
+            "affinity": 0,
+            "queryError": 0,
+            "clearError": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "T03",
+      "name": "monitor affinity neutralized",
+      "result": "passed",
+      "milliseconds": 407,
+      "observations": {
+        "protocol": 1,
+        "version": "1.0.0",
+        "loaded": true,
+        "initialized": true,
+        "hookActive": true,
+        "stable": true,
+        "overflow": false,
+        "error": 0,
+        "stage": "command",
+        "blocked": "98",
+        "observedAt": "134359625172978539",
+        "identity": {
+          "pid": 25176,
+          "created": "134359625149032839",
+          "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+          "arch": "x64"
+        },
+        "windows": [
+          {
+            "hwnd": "14748770",
+            "threadId": 36292,
+            "className": "AigaCaptureFixture",
+            "valid": true,
+            "before": 0,
+            "affinity": 0,
+            "queryError": 0,
+            "clearError": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "forwarding",
+      "name": "unknown affinity, child, invalid HWND and WDA_NONE preserve native results",
+      "result": "passed",
+      "milliseconds": 7,
+      "observations": {
+        "original": {
+          "unknown": {
+            "ok": false,
+            "error": 87
+          },
+          "child": {
+            "ok": false,
+            "error": 87
+          },
+          "invalid": {
+            "ok": false,
+            "error": 1400
+          },
+          "none": {
+            "ok": true,
+            "error": 4660
+          }
+        },
+        "hooked": {
+          "unknown": {
+            "ok": false,
+            "error": 87
+          },
+          "child": {
+            "ok": false,
+            "error": 87
+          },
+          "invalid": {
+            "ok": false,
+            "error": 1400
+          },
+          "none": {
+            "ok": true,
+            "error": 4660
+          }
+        }
+      }
+    },
+    {
+      "id": "T04",
+      "name": "multiple and recreated windows",
+      "result": "passed",
+      "milliseconds": 539,
+      "observations": {
+        "multiple": {
+          "protocol": 1,
+          "version": "1.0.0",
+          "loaded": true,
+          "initialized": true,
+          "hookActive": true,
+          "stable": true,
+          "overflow": false,
+          "error": 0,
+          "stage": "command",
+          "blocked": "123",
+          "observedAt": "134359625175615773",
+          "identity": {
+            "pid": 25176,
+            "created": "134359625149032839",
+            "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+            "arch": "x64"
+          },
+          "windows": [
+            {
+              "hwnd": "1577180",
+              "threadId": 36292,
+              "className": "AigaCaptureFixture",
+              "valid": true,
+              "before": 0,
+              "affinity": 0,
+              "queryError": 0,
+              "clearError": 0
+            },
+            {
+              "hwnd": "14748770",
+              "threadId": 36292,
+              "className": "AigaCaptureFixture",
+              "valid": true,
+              "before": 0,
+              "affinity": 0,
+              "queryError": 0,
+              "clearError": 0
+            }
+          ]
+        },
+        "recreated": {
+          "protocol": 1,
+          "version": "1.0.0",
+          "loaded": true,
+          "initialized": true,
+          "hookActive": true,
+          "stable": true,
+          "overflow": false,
+          "error": 0,
+          "stage": "command",
+          "blocked": "144",
+          "observedAt": "134359625178423352",
+          "identity": {
+            "pid": 25176,
+            "created": "134359625149032839",
+            "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+            "arch": "x64"
+          },
+          "windows": [
+            {
+              "hwnd": "1642716",
+              "threadId": 36292,
+              "className": "AigaCaptureFixture",
+              "valid": true,
+              "before": 0,
+              "affinity": 0,
+              "queryError": 0,
+              "clearError": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "no-windows",
+      "name": "active hook without windows never claims capture verification",
+      "result": "passed",
+      "milliseconds": 571,
+      "observations": {
+        "protocol": 1,
+        "version": "1.0.0",
+        "loaded": true,
+        "initialized": true,
+        "hookActive": true,
+        "stable": true,
+        "overflow": false,
+        "error": 0,
+        "stage": "command",
+        "blocked": "150",
+        "observedAt": "134359625181333640",
+        "identity": {
+          "pid": 25176,
+          "created": "134359625149032839",
+          "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+          "arch": "x64"
+        },
+        "windows": []
+      }
+    },
+    {
+      "id": "T05-control",
+      "name": "second equivalent process unchanged",
+      "result": "passed",
+      "milliseconds": 109,
+      "observations": {
+        "protocol": 1,
+        "version": "1.0.0",
+        "loaded": false,
+        "initialized": false,
+        "hookActive": false,
+        "stable": false,
+        "overflow": false,
+        "error": 0,
+        "stage": "command",
+        "blocked": "0",
+        "observedAt": "0",
+        "identity": {
+          "pid": 36664,
+          "created": "134359625149848632",
+          "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+          "arch": "x64"
+        },
+        "windows": [
+          {
+            "hwnd": "6294624",
+            "threadId": 34068,
+            "className": "AigaCaptureFixture",
+            "valid": true,
+            "before": null,
+            "affinity": 17,
+            "queryError": 0,
+            "clearError": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "T07-identity",
+      "name": "stale creation time refused",
+      "result": "passed",
+      "milliseconds": 116,
+      "observations": {
+        "protocol": 1,
+        "error": 87,
+        "stage": "identity",
+        "uncertain": false
+      }
+    },
+    {
+      "id": "T08-architecture",
+      "name": "incompatible architecture refused",
+      "result": "passed",
+      "milliseconds": 134,
+      "observations": {
+        "protocol": 1,
+        "error": 193,
+        "stage": "architecture",
+        "uncertain": false
+      }
+    },
+    {
+      "id": "T11",
+      "name": "duplicate enable is idempotent",
+      "result": "passed",
+      "milliseconds": 386,
+      "observations": [
+        {
+          "protocol": 1,
+          "version": "1.0.0",
+          "loaded": true,
+          "initialized": true,
+          "hookActive": true,
+          "stable": true,
+          "overflow": false,
+          "error": 0,
+          "stage": "command",
+          "blocked": "197",
+          "observedAt": "134359625189777897",
+          "identity": {
+            "pid": 25176,
+            "created": "134359625149032839",
+            "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+            "arch": "x64"
+          },
+          "windows": [
+            {
+              "hwnd": "1708252",
+              "threadId": 36292,
+              "className": "AigaCaptureFixture",
+              "valid": true,
+              "before": 0,
+              "affinity": 0,
+              "queryError": 0,
+              "clearError": 0
+            }
+          ]
+        },
+        {
+          "protocol": 1,
+          "version": "1.0.0",
+          "loaded": true,
+          "initialized": false,
+          "hookActive": false,
+          "stable": false,
+          "overflow": false,
+          "error": 170,
+          "stage": "command",
+          "blocked": "0",
+          "observedAt": "0",
+          "identity": {
+            "pid": 25176,
+            "created": "134359625149032839",
+            "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+            "arch": "x64"
+          },
+          "windows": []
+        }
+      ]
+    },
+    {
+      "id": "T18-token",
+      "name": "other same-user controller cannot disable or claim",
+      "result": "passed",
+      "milliseconds": 242,
+      "observations": {
+        "disabled": {
+          "protocol": 1,
+          "version": "1.0.0",
+          "loaded": true,
+          "initialized": true,
+          "hookActive": true,
+          "stable": false,
+          "overflow": false,
+          "error": 5,
+          "stage": "command",
+          "blocked": "221",
+          "observedAt": "0",
+          "identity": {
+            "pid": 25176,
+            "created": "134359625149032839",
+            "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+            "arch": "x64"
+          },
+          "windows": []
+        },
+        "enabled": {
+          "protocol": 1,
+          "version": "1.0.0",
+          "loaded": true,
+          "initialized": true,
+          "hookActive": true,
+          "stable": false,
+          "overflow": false,
+          "error": 5,
+          "stage": "command",
+          "blocked": "229",
+          "observedAt": "0",
+          "identity": {
+            "pid": 25176,
+            "created": "134359625149032839",
+            "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+            "arch": "x64"
+          },
+          "windows": []
+        }
+      }
+    },
+    {
+      "id": "T15",
+      "name": "bounded soak with reapplication and recreation",
+      "result": "passed",
+      "milliseconds": 5551,
+      "observations": {
+        "observations": 8,
+        "resourcesBefore": {
+          "handles": 89,
+          "privateBytes": 1490944
+        },
+        "resourcesAfter": {
+          "handles": 89,
+          "privateBytes": 1490944
+        },
+        "last": {
+          "protocol": 1,
+          "version": "1.0.0",
+          "loaded": true,
+          "initialized": true,
+          "hookActive": true,
+          "stable": true,
+          "overflow": false,
+          "error": 0,
+          "stage": "command",
+          "blocked": "563",
+          "observedAt": "134359625249529668",
+          "identity": {
+            "pid": 25176,
+            "created": "134359625149032839",
+            "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+            "arch": "x64"
+          },
+          "windows": [
+            {
+              "hwnd": "2232540",
+              "threadId": 36292,
+              "className": "AigaCaptureFixture",
+              "valid": true,
+              "before": 0,
+              "affinity": 0,
+              "queryError": 0,
+              "clearError": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "T12",
+      "name": "disable does not restore old affinity",
+      "result": "passed",
+      "milliseconds": 313,
+      "observations": {
+        "protocol": 1,
+        "version": "1.0.0",
+        "loaded": true,
+        "initialized": true,
+        "hookActive": false,
+        "stable": true,
+        "overflow": false,
+        "error": 0,
+        "stage": "command",
+        "blocked": "568",
+        "observedAt": "134359625252651645",
+        "identity": {
+          "pid": 25176,
+          "created": "134359625149032839",
+          "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+          "arch": "x64"
+        },
+        "windows": [
+          {
+            "hwnd": "2232540",
+            "threadId": 36292,
+            "className": "AigaCaptureFixture",
+            "valid": true,
+            "before": 0,
+            "affinity": 0,
+            "queryError": 0,
+            "clearError": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "T13",
+      "name": "original application requests work again",
+      "result": "passed",
+      "milliseconds": 401,
+      "observations": {
+        "protocol": 1,
+        "version": "1.0.0",
+        "loaded": true,
+        "initialized": true,
+        "hookActive": false,
+        "stable": false,
+        "overflow": false,
+        "error": 0,
+        "stage": "command",
+        "blocked": "568",
+        "observedAt": "134359625256732498",
+        "identity": {
+          "pid": 25176,
+          "created": "134359625149032839",
+          "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+          "arch": "x64"
+        },
+        "windows": [
+          {
+            "hwnd": "2232540",
+            "threadId": 36292,
+            "className": "AigaCaptureFixture",
+            "valid": true,
+            "before": 17,
+            "affinity": 17,
+            "queryError": 0,
+            "clearError": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "T14",
+      "name": "lost controller lease removes hook",
+      "result": "passed",
+      "milliseconds": 17419,
+      "observations": {
+        "protocol": 1,
+        "version": "1.0.0",
+        "loaded": true,
+        "initialized": true,
+        "hookActive": false,
+        "stable": false,
+        "overflow": false,
+        "error": 0,
+        "stage": "command",
+        "blocked": "1523",
+        "observedAt": "134359625430879348",
+        "identity": {
+          "pid": 25176,
+          "created": "134359625149032839",
+          "path": "C:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe",
+          "arch": "x64"
+        },
+        "windows": [
+          {
+            "hwnd": "2232540",
+            "threadId": 36292,
+            "className": "AigaCaptureFixture",
+            "valid": true,
+            "before": 17,
+            "affinity": 17,
+            "queryError": 0,
+            "clearError": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "T07-exit",
+      "name": "natural process exit invalidates session",
+      "result": "passed",
+      "milliseconds": 123,
+      "observations": {
+        "protocol": 1,
+        "error": 87,
+        "stage": "identity",
+        "uncertain": false
+      }
+    }
+  ],
+  "fixtureHashBefore": "fa7835bc3d9efaf81f8857f06b4b8153f99983c563032ca3e6b691fc3c06ea7c",
+  "finishedAt": "2026-10-08T19:49:03.223Z",
+  "fixtureHashAfter": "fa7835bc3d9efaf81f8857f06b4b8153f99983c563032ca3e6b691fc3c06ea7c"
+}

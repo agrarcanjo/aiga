@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-08T19:47:42.235Z",
+  "result": "passed",
+  "activeText": "Compatibilidade de captura — Java\n\nRecurso opcional para todas as janelas de uma instância selecionada. Disponível para Windows x64.\n\nAtualizar instâncias\nPID 39112 · x64 · 08/10/2026, 16:47:38\nC:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe\n2 janela(s): AigaCaptureFixture / HWND 3542014 / 0x11; IME / HWND 2492754 / 0x0\nSelecionar esta instância\n\nSelecionado: PID 39112 · x64\nCriado em 08/10/2026, 16:47:38\nC:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe\n\nHabilitar compatibilidade\nVerificar agora\nDesativar\nAtivo e verificado\n\nHook ativo e afinidade real das janelas observadas igual a 0x0.\n\nObservação: 08/10/2026, 16:47:40 · Chamadas neutralizadas: 0\n\nEtapa: command · DLL: carregada · Hook: ativo\n\nHWND / classe\tAntes\tObservada\tErro consulta / limpeza\n2492754\nIME\t0x0\t0x0\t0 / 0\n3542014\nAigaCaptureFixture\t0x11\t0x0\t0 / 0\n\nO resultado corresponde às janelas e ao horário consultados. Ao fechar o AIGA ou perder comunicação, a DLL tenta remover a interceptação após 15 segundos. Desativar não restaura a proteção anterior; a aplicação poderá solicitá-la novamente.",
+  "disabledText": "Compatibilidade de captura — Java\n\nRecurso opcional para todas as janelas de uma instância selecionada. Disponível para Windows x64.\n\nAtualizar instâncias\nPID 39112 · x64 · 08/10/2026, 16:47:38\nC:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe\n2 janela(s): AigaCaptureFixture / HWND 3542014 / 0x11; IME / HWND 2492754 / 0x0\nSelecionar esta instância\n\nSelecionado: PID 39112 · x64\nCriado em 08/10/2026, 16:47:38\nC:\\develop\\branches\\aiga\\apps\\desktop\\native\\capture-compat\\out\\x64\\Release\\aiga-capture-fixture.exe\n\nHabilitar compatibilidade\nVerificar agora\nDesativar\nDesativado\n\nInterceptação desativada. A aplicação pode voltar a solicitar proteção.\n\nObservação: 08/10/2026, 16:47:42 · Chamadas neutralizadas: 82\n\nEtapa: command · DLL: carregada · Hook: inativo\n\nHWND / classe\tAntes\tObservada\tErro consulta / limpeza\n2492754\nIME\t0x0\t0x0\t0 / 0\n3542014\nAigaCaptureFixture\t0x0\t0x11\t0 / 0\n\nO resultado corresponde às janelas e ao horário consultados. Ao fechar o AIGA ou perder comunicação, a DLL tenta remover a interceptação após 15 segundos. Desativar não restaura a proteção anterior; a aplicação poderá solicitá-la novamente.",
+  "guardEnabled": true,
+  "guardBefore": {
+    "known": true,
+    "affinity": 17,
+    "error": 0
+  },
+  "guardAfter": {
+    "known": true,
+    "affinity": 17,
+    "error": 0
+  }
+}
