@@ -42,6 +42,11 @@ const { createTranslationOverlayWindow } = require("./translation-overlay-window
 const { createConsentAuditStore } = require("./consent-audit-store.cjs");
 const { createRetentionPurgeService } = require("./retention-purge-service.cjs");
 const { CHAT_WINDOW } = require("./window-layout.cjs");
+const { pathToFileURL } = require("node:url");
+const { createCaptureCompatService, registerCaptureCompatIpc } = require("./capture-compat-service.cjs");
+const rendererUrl = () => app.isPackaged
+  ? pathToFileURL(path.join(__dirname, "../dist/index.html")).href
+  : new URL(process.env.VITE_DEV_SERVER_URL || "http://localhost:5173").href;
 
 let logger;
 let shortcutService;
@@ -91,7 +96,7 @@ function createWindow() {
     contentProtectionGuard.register(mainWindowRef);
   }
 
-  const url = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
+  const url = rendererUrl();
   logger.debug("Loading renderer URL", { url });
   mainWindowRef.loadURL(url);
   mainWindowRef.once("ready-to-show", () => {
@@ -119,6 +124,13 @@ app.whenReady().then(() => {
   logger = createLocalLogger({
     level: process.env.DESKTOP_LOG_LEVEL || "info"
   });
+  const captureCompatService = createCaptureCompatService({
+    appVersion: app.getVersion(),
+    resourcesRoot: app.isPackaged ? path.join(process.resourcesPath, "resources") : path.join(__dirname, "../resources"),
+    logger,
+  });
+  registerCaptureCompatIpc({ ipcMain: require("electron").ipcMain, service: captureCompatService, getMainWindow: () => mainWindowRef, trustedUrl: rendererUrl });
+  app.on("before-quit", () => captureCompatService.close());
   settingsStoreRef = createSettingsStore();
   envConfigRef = getEnvironmentConfig();
   const settingsStore = settingsStoreRef;

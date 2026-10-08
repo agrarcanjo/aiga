@@ -392,6 +392,9 @@ Variaveis principais:
 
 ### Escalonamento tecnico
 
+A compatibilidade opcional de captura para uma instância Java no Windows x64 está documentada em
+[operação e build](docs/capture-compat-windows.md) e [evidências e pendências de aceite](docs/capture-compat-validation.md).
+
 - Se houver regressao funcional apos update:
 	1. nao confirmar saude da versao
 	2. iniciar rollback no painel de auto-update

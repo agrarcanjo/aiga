@@ -9,3 +9,6 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+apps/desktop/native/capture-compat/vendor/
+apps/desktop/resources/capture-compat/
+apps/desktop/release/

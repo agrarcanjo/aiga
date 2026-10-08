@@ -14,6 +14,11 @@ const autoUpdateEventChannel = "auto-update:event";
  */
 contextBridge.exposeInMainWorld("desktopApi", {
   version: "0.1.0",
+  listCaptureCompatCandidates: () => ipcRenderer.invoke("capture-compat:list"),
+  selectCaptureCompatTarget: (identity) => ipcRenderer.invoke("capture-compat:select", identity),
+  enableCaptureCompat: () => ipcRenderer.invoke("capture-compat:enable"),
+  queryCaptureCompat: () => ipcRenderer.invoke("capture-compat:query"),
+  disableCaptureCompat: () => ipcRenderer.invoke("capture-compat:disable"),
   ping: (payload) => ipcRenderer.invoke("desktop:ping", payload),
   captureScreenshot: (payload) => ipcRenderer.invoke("screenshot:capture", payload),
   getScreenshotQueue: () => ipcRenderer.invoke("screenshot:queue:get"),

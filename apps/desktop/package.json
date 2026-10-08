@@ -11,10 +11,14 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test electron/**/*.test.cjs",
     "test:e2e": "node --test electron/**/*.e2e.test.cjs",
-    "pack:win": "vite build && node electron/ci-sign-check.cjs && electron-builder --win --dir",
-    "dist:win": "vite build && node electron/ci-sign-check.cjs && electron-builder --win --publish never"
+    "build:capture-compat": "powershell -NoProfile -ExecutionPolicy Bypass -File native/capture-compat/build.ps1",
+    "test:capture-compat": "node native/capture-compat/test-native.cjs",
+    "test:capture-compat-ui": "node native/capture-compat/test-ui.mjs",
+    "pack:win": "pnpm build:capture-compat && vite build && node electron/ci-sign-check.cjs && electron-builder --win --dir",
+    "dist:win": "pnpm build:capture-compat && vite build && node electron/ci-sign-check.cjs && electron-builder --win --publish never"
   },
   "build": {
+    "afterSign": "electron/capture-compat-after-sign.cjs",
     "appId": "com.cloneperssua.desktop",
     "productName": "AIGA",
     "copyright": "Copyright © 2025 AIGA",

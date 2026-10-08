@@ -7,6 +7,7 @@ import type {
 } from "@clone-perssua/shared-types";
 import { AudioCaptureSettings } from "./AudioCaptureSettings";
 import { ScreenCaptureSettings } from "./ScreenCaptureSettings";
+import { CaptureCompatSettings } from "./CaptureCompatSettings";
 import { AutoUpdateSettings } from "./AutoUpdateSettings";
 import { EnvironmentSettings } from "./EnvironmentSettings";
 import { FeatureFlagsSettings } from "./FeatureFlagsSettings";
@@ -627,6 +628,7 @@ export function SettingsPage({
           {tab === "screen" && (
             <div style={{ maxWidth: 560 }}>
               <ScreenCaptureSettings inputStyle={is} primaryBtn={pb} secondaryBtn={sb} />
+              <CaptureCompatSettings buttonStyle={sb} />
             </div>
           )}
 

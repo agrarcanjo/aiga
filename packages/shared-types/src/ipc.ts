@@ -748,6 +748,11 @@ export interface EnvGetResponse {
  * Contrato tipado da API exposta no preload.
  */
 export interface DesktopApi {
+  listCaptureCompatCandidates(): Promise<import("./capture-compat").CaptureCompatCandidate[]>;
+  selectCaptureCompatTarget(identity: import("./capture-compat").CaptureCompatIdentity): Promise<import("./capture-compat").CaptureCompatState>;
+  enableCaptureCompat(): Promise<import("./capture-compat").CaptureCompatState>;
+  queryCaptureCompat(): Promise<import("./capture-compat").CaptureCompatState>;
+  disableCaptureCompat(): Promise<import("./capture-compat").CaptureCompatState>;
   version: string;
   ping(payload: DesktopPingRequest): Promise<DesktopPingResponse>;
   captureScreenshot(payload: ScreenshotCaptureRequest): Promise<ScreenshotCaptureResponse>;

@@ -9,3 +9,4 @@ export * from "./ipc";
 export * from "./llm";
 export * from "./meeting";
 export * from "./translation";
+export * from "./capture-compat";
