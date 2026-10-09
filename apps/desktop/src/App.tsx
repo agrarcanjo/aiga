@@ -107,6 +107,7 @@ export function App(): JSX.Element {
   const [selectToPrompt, setSelectToPrompt] = useState(false);
 
   // ── Settings — Shortcuts ─────────────────────────────────────────────────
+  const [compatibilityMessage, setCompatibilityMessage] = useState("");
   const [captureShortcut, setCaptureShortcut] = useState("Ctrl+E");
   const [pushToTalkShortcut, setPushToTalkShortcut] = useState("Ctrl+D");
 
@@ -137,7 +138,10 @@ export function App(): JSX.Element {
     });
     const unsubChat = window.desktopApi.onChatStreamEvent(handleChatStreamEvent);
     const unsubStealth = window.desktopApi.onStealthStateChanged(handleStealthStateChanged);
+    const unsubCompat = window.desktopApi.onCaptureCompatibilityResult((result) => setCompatibilityMessage(result.message));
     const unsubQuick = window.desktopApi.onQuickAnalyze((p) => {
+      setSettingsOpen(false);
+      setAppMode("chat");
       const captureIds =
         Array.isArray(p.captureIds) && p.captureIds.length > 0 ? p.captureIds : [p.captureId];
       const previewDataUrls =
@@ -166,6 +170,7 @@ export function App(): JSX.Element {
       unsubChat();
       unsubStealth();
       unsubQuick();
+      unsubCompat();
       stopRecording();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -910,6 +915,7 @@ export function App(): JSX.Element {
           </div>
         </div>
 
+        {compatibilityMessage && <div role="status" aria-live="polite" style={{ padding: "8px 12px", fontSize: 12, color: C.text }}><span>{compatibilityMessage}</span><button type="button" aria-label="Fechar aviso" onClick={() => setCompatibilityMessage("")}>×</button></div>}
         {settingsOpen ? (
           <SettingsPage
             initialTab={settingsTab}

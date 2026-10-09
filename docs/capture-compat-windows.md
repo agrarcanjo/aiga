@@ -137,7 +137,7 @@ Os logs do AIGA em `userData/logs/desktop.log` contêm IDs de operação, versõ
 
 **Não incluído.** Um launcher seria tecnicamente investigável com criação controlada do processo e sequência explícita de inicialização/handshake, mas apenas criar suspenso ou carregar a DLL cedo não comprova que o hook antecede a primeira chamada de todas as threads relevantes. Também faltam a linha de comando real, suas regras de aspas, ambiente e diretório de trabalho autorizados para reproduzir a execução.
 
-Esta entrega atende instalação em processo existente e não anuncia bloqueio da primeira chamada, monitor automático de Java ou alteração de atalhos. A inclusão futura exige teste de ordem, argumentos, cwd, ambiente, falha de preparação e adesão/reversão explícitas. T20 é não aplicável à entrega atual.
+Esta entrega atende instalação em processo existente e não anuncia bloqueio da primeira chamada, monitor automático de Java ou alteração do atalho de inicialização do Java. A inclusão futura exige teste de ordem, argumentos, cwd, ambiente, falha de preparação e adesão/reversão explícitas. T20 é não aplicável à entrega atual.
 
 ## Referências primárias
 
@@ -146,3 +146,14 @@ Esta entrega atende instalação em processo existente e não anuncia bloqueio d
 - [Microsoft Detours 4.0.1](https://github.com/microsoft/Detours/tree/e4bfd6b03e50de46b47abfbd1e46b384f0c5f833)
 - [Using Detours](https://github.com/microsoft/Detours/wiki/Using-Detours)
 - [DisableThreadLibraryCalls e CRT estático](https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-disablethreadlibrarycalls)
+## Ativação quando o Java ocupa a tela
+
+No código atualizado, abra o AIGA antes do Java e use **Ctrl+Shift+J** para habilitar a compatibilidade. A combinação pode ser alterada ou deixada em branco em Configurações → Atalhos. Se estiver ocupada na inicialização, fica em branco e o aplicativo continua abrindo.
+
+O atalho usa a seleção atual; sem seleção, só escolhe se a descoberta retornar exatamente uma instância Java. Com várias instâncias, selecione previamente a desejada. Sem Java aberto, o aviso pede abrir a aplicação e pressionar novamente. Não há monitoramento global ou ativação automática na inicialização. Repetir o atalho com a interceptação ativa apenas verifica seu estado.
+
+Aguarde a mensagem de hook ativo e afinidade real igual a `0x0`, então use o atalho de captura. O resultado da operação aparece na janela principal. O AIGA mantém a renderização em segundo plano e reforça a posição da janela no modo stealth visível, sem roubar o foco do teclado. Ocultação completa, minimização e ocultação durante a captura continuam sendo respeitadas. Uma captura rápida abre o chat para exibir a análise.
+
+Essas mudanças foram verificadas por testes de serviço e TypeScript, sem gerar build. É necessário validar com a aplicação Java real; nenhuma garantia é feita sobre janelas em outro desktop do Windows ou bloqueios do sistema. A análise também depende de um provedor de IA configurado; o erro `AUTH_INVALID_API_KEY` impede a resposta mesmo com captura correta.
+
+A configuração de renderização segue a [documentação oficial do Electron sobre backgroundThrottling](https://www.electronjs.org/docs/latest/api/structures/web-preferences). A atualização de posição usa [setAlwaysOnTop e moveTop](https://www.electronjs.org/docs/latest/api/browser-window), sem chamada periódica a focus.

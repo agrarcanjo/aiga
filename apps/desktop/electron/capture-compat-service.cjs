@@ -170,6 +170,27 @@ function createCaptureCompatService({ resourcesRoot, logger = { info() {} }, app
       return operate("query");
     }),
     enable: () => serialize(() => operate("enable")),
+    enableFromShortcut: () => serialize(async () => {
+      if (closed) throw new Error("Serviço encerrado.");
+      if (platform !== "win32") throw new Error("Compatibilidade disponível apenas no Windows.");
+      if (selected) {
+        const current = await operate("query");
+        if (!selected) return current; // Never migrate a stale selection to a different process.
+        if (current.status === "unknown" || current.status === "failed" || current.hookActive) return current;
+        return operate("enable");
+      }
+      const discovery = await run("list");
+      if (discovery.error) throw new Error(explain(discovery.error, discovery.stage));
+      candidates = z.array(identitySchema.extend({ windows: z.array(windowSchema).max(256) })).max(1024).parse(discovery.candidates);
+      if (candidates.length !== 1) throw new Error(candidates.length
+        ? "Há várias instâncias Java. Selecione a desejada em Configurações > Captura tela antes de usar o atalho."
+        : "Nenhuma instância Java encontrada. Abra a aplicação Java e pressione o atalho novamente.");
+      const { windows, ...identity } = candidates[0];
+      selected = identity; token = randomBytes(32).toString("hex");
+      const current = await operate("query");
+      if (!selected || current.status === "failed" || current.status === "unknown" || current.hookActive) return current;
+      return operate("enable");
+    }),
     query: () => serialize(() => selected ? operate("query") : snapshot()),
     disable: () => serialize(() => operate("disable")),
     snapshot,

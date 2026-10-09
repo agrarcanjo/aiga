@@ -99,7 +99,8 @@ const DEFAULT_SETTINGS = {
   shortcuts: {
     captureScreen: "Ctrl+E",
     pushToTalk: "Ctrl+D",
-    toggleFullStealth: "Ctrl+Shift+H"
+    toggleFullStealth: "Ctrl+Shift+H",
+    captureCompatibility: "Ctrl+Shift+J"
   },
   geminiApiKeyEncrypted: "",
   llmProviders: { ...DEFAULT_LLM_PROVIDERS },
@@ -318,6 +319,7 @@ function createSettingsStore() {
       selectedAudioInputDeviceId: raw.selectedAudioInputDeviceId || undefined,
       selectedAudioInputDeviceLabel: raw.selectedAudioInputDeviceLabel || undefined,
       shortcuts: {
+        captureCompatibility: raw.shortcuts?.captureCompatibility ?? DEFAULT_SETTINGS.shortcuts.captureCompatibility,
         captureScreen: raw.shortcuts?.captureScreen ?? DEFAULT_SETTINGS.shortcuts.captureScreen,
         pushToTalk: raw.shortcuts?.pushToTalk ?? DEFAULT_SETTINGS.shortcuts.pushToTalk,
         toggleFullStealth:

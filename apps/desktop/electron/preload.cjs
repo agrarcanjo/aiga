@@ -65,6 +65,11 @@ contextBridge.exposeInMainWorld("desktopApi", {
       ipcRenderer.removeListener(screenshotQueueUpdatedChannel, wrappedListener);
     };
   },
+  onCaptureCompatibilityResult: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on("capture-compat:result", handler);
+    return () => ipcRenderer.removeListener("capture-compat:result", handler);
+  },
   onQuickAnalyze: (listener) => {
     const wrappedListener = (_event, payload) => listener(payload);
     ipcRenderer.on(screenshotQuickAnalyzeChannel, wrappedListener);

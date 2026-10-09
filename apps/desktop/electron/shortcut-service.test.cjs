@@ -4,12 +4,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-function harness({ blocked = [], throwing = [] } = {}) {
-  const attempts = [], warnings = [];
+function harness({ blocked = [], throwing = [], compatibility = "", enableFromShortcut = async () => ({ status: "verified", message: "Ativo" }) } = {}) {
+  const attempts = [], warnings = [], events = [], handlers = {};
   const shortcuts = { captureScreen: "Ctrl+E", toggleFullStealth: "Ctrl+Shift+H", pushToTalk: "Ctrl+D" };
+  if (compatibility) shortcuts.captureCompatibility = compatibility;
   const context = { module: { exports: {} }, require(name) {
     if (name === "electron") return { globalShortcut: {
-      register(accelerator) {
+      register(accelerator, handler) {
+        handlers[accelerator] = handler;
         attempts.push(accelerator);
         if (throwing.includes(accelerator)) throw new Error("Invalid accelerator");
         return !blocked.includes(accelerator);
@@ -19,10 +21,13 @@ function harness({ blocked = [], throwing = [] } = {}) {
   } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "shortcut-service.cjs"), "utf8"), context);
   const service = context.module.exports.createShortcutService({
+    captureCompatService: { enableFromShortcut },
+    stealthWindowService: { getState: () => ({}), exitFullStealthIfActive: () => ({ changed: false }), ensureVisibleOnTop() {} },
+    emitRendererEvent: (channel, payload) => events.push({ channel, payload }),
     logger: { info() {}, error() {}, warn: (...args) => warnings.push(args) },
-    settingsStore: { getPublicSettings: () => ({ shortcuts }), savePartial: (partial) => Object.assign(shortcuts, partial.shortcuts) },
+    settingsStore: { getNonStealthModeEnabled: () => false, getPublicSettings: () => ({ shortcuts }), savePartial: (partial) => Object.assign(shortcuts, partial.shortcuts) },
   });
-  return { service, attempts, warnings, shortcuts };
+  return { service, attempts, warnings, shortcuts, handlers, events };
 }
 test("occupied startup shortcut does not prevent other shortcuts or application startup", () => {
   const { service, attempts, warnings } = harness({ blocked: ["Ctrl+E"] });
@@ -62,4 +67,23 @@ test("clearing one conflict preserves other shortcuts", () => {
  assert.equal(shortcuts.toggleFullStealth, "");
  assert.equal(shortcuts.captureScreen, "Ctrl+E");
  assert.equal(shortcuts.pushToTalk, "Ctrl+D");
+});
+
+test("compatibility shortcut emits progress and result and ignores repeated presses while pending", async () => {
+  let finish, calls = 0;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const { service, handlers, events } = harness({ compatibility: "Ctrl+Shift+J", enableFromShortcut: () => { calls++; return pending; } });
+  service.refreshShortcuts({ allowUnavailable: true });
+  handlers["Ctrl+Shift+J"](); handlers["Ctrl+Shift+J"]();
+  assert.equal(calls, 1);
+  assert.equal(events[0].payload.status, "installing");
+  finish({ status: "verified", message: "Ativo" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.at(-1).payload.status, "verified");
+});
+test("occupied compatibility shortcut is cleared without preventing startup", () => {
+  const { service, shortcuts } = harness({ compatibility: "Ctrl+Shift+J", blocked: ["Ctrl+Shift+J"] });
+  service.refreshShortcuts({ allowUnavailable: true });
+  assert.equal(shortcuts.captureCompatibility, "");
+  assert.equal(shortcuts.captureScreen, "Ctrl+E");
 });

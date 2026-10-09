@@ -206,6 +206,7 @@ export function SettingsPage({
   const [savedMicLabel, setSavedMicLabel] = useState("");
   const [micStatus, setMicStatus] = useState("");
 
+  const [compatShortcut, setCompatShortcut] = useState("");
   const [captureShortcut, setCaptureShortcut] = useState("Ctrl+E");
   const [pushToTalkShortcut, setPushToTalkShortcut] = useState("Ctrl+D");
   const [fullStealthShortcut, setFullStealthShortcut] = useState("Ctrl+Shift+H");
@@ -233,6 +234,7 @@ export function SettingsPage({
     setNonStealthModeEnabled(Boolean(r.settings.nonStealthModeEnabled));
     setDefaultCodeLanguage(r.settings.defaultCodeLanguage || "java");
     setCaptureShortcut(r.settings.shortcuts.captureScreen);
+    setCompatShortcut(r.settings.shortcuts.captureCompatibility ?? "");
     setPushToTalkShortcut(r.settings.shortcuts.pushToTalk);
     setFullStealthShortcut(r.settings.shortcuts.toggleFullStealth ?? "");
     setSelectedDeviceId(r.settings.selectedAudioInputDeviceId || "");
@@ -361,11 +363,12 @@ export function SettingsPage({
     await window.desktopApi.saveSettings({
       shortcuts: {
         captureScreen: captureShortcut,
+        captureCompatibility: compatShortcut,
         pushToTalk: pushToTalkShortcut,
         toggleFullStealth: fullStealthShortcut,
       },
     });
-    setShortcutStatus("Atalhos salvos. Reinicie o app para aplicar.");
+    setShortcutStatus("Atalhos salvos e aplicados.");
     onSettingsChanged?.();
   }
 
@@ -692,6 +695,7 @@ export function SettingsPage({
               {(
                 [
                   ["Captura de tela", captureShortcut, setCaptureShortcut],
+                  ["Habilitar compatibilidade Java", compatShortcut, setCompatShortcut],
                   ["Push-to-talk", pushToTalkShortcut, setPushToTalkShortcut],
                   ["Full stealth", fullStealthShortcut, setFullStealthShortcut],
                 ] as [string, string, (v: string) => void][]

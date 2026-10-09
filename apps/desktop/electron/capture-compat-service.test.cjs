@@ -4,6 +4,46 @@ const { createCaptureCompatService, registerCaptureCompatIpc } = require("./capt
 const identity = { pid: 42, created: "134000000000000000", path: "C:\\Java\\javaw.exe", arch: "x64" };
 const row = { hwnd: "123", threadId: 2, className: "Fixture", valid: true, before: 17, affinity: 0, queryError: 0, clearError: 0 };
 const result = (overrides = {}) => ({ protocol: 1, version: "1.0.0", loaded: true, initialized: true, hookActive: true, stable: true, overflow: false, error: 0, stage: "command", blocked: "12", observedAt: "134000000000000000", identity, windows: [row], ...overrides });
+test("shortcut discovers a unique Java and enables with verified evidence", async () => {
+  const calls = [];
+  const service = createCaptureCompatService({ platform: "win32", resourcesRoot: "unused", pollMs: 0,
+    run: async (op) => {
+      calls.push(op);
+      if (op === "list") return { candidates: [{ ...identity, windows: [row] }] };
+      return result({ hookActive: op === "enable" });
+    } });
+  assert.equal((await service.enableFromShortcut()).status, "verified");
+  assert.deepEqual(calls, ["list", "query", "enable"]);
+  service.close();
+});
+test("shortcut never chooses between multiple Java instances or acts with no target", async () => {
+  for (const candidates of [[], [{ ...identity, windows: [] }, { ...identity, pid: 43, windows: [] }]]) {
+    const calls = [];
+    const service = createCaptureCompatService({ platform: "win32", resourcesRoot: "unused", pollMs: 0,
+      run: async (op) => { calls.push(op); return { candidates }; } });
+    await assert.rejects(service.enableFromShortcut(), /instâncias Java|instância Java/);
+    assert.deepEqual(calls, ["list"]);
+    assert.equal(service.snapshot().selected, null);
+    service.close();
+  }
+});
+test("shortcut rechecks an active selection without injecting again", async () => {
+  const { service, calls } = await setup();
+  await service.enable();
+  const start = calls.length;
+  assert.equal((await service.enableFromShortcut()).status, "verified");
+  assert.deepEqual(calls.slice(start).map(c => c.op), ["query"]);
+  service.close();
+});
+test("shortcut does not migrate a stale selected process", async () => {
+  const { service, calls } = await setup({ protocol: 1, error: 87, stage: "access" });
+  calls.length = 1; // Keep the initial query counted by the fixture.
+  calls[0] = { op: "query" };
+  const state = await service.enableFromShortcut();
+  assert.equal(state.selected, null);
+  assert.equal(calls.some(c => c.op === "enable" || c.op === "list"), false);
+  service.close();
+});
 async function setup(next = result()) {
   const calls = [];
   const service = createCaptureCompatService({ platform: "win32", resourcesRoot: "unused", pollMs: 0, run: async (op, target) => {

@@ -42,6 +42,7 @@ export function CaptureCompatSettings({ buttonStyle }: { buttonStyle: React.CSSP
   const selected = state?.selected;
   return <section style={{ marginTop: 28, borderTop: "1px solid #444", paddingTop: 18, color: "#ddd", fontSize: 13 }}>
     <h3>Compatibilidade de captura — Java</h3>
+    <p>Você também pode habilitar pelo atalho definido em Configurações → Atalhos (padrão Ctrl+Shift+J). Com uma única instância Java, ela será selecionada pelo atalho; com várias, selecione uma previamente. Não há monitoramento global de outros aplicativos.</p>
     <p>Recurso opcional para todas as janelas de uma instância selecionada. Disponível para Windows x64.</p>
     <p>Antes de capturar: atualize as instâncias, selecione o PID da aplicação Java e clique em Habilitar compatibilidade. O atalho de captura não habilita este recurso. Confira o estado e a afinidade observada das janelas antes de testar a imagem.</p>
     <button style={buttonStyle} disabled={busy} onClick={() => void perform(async () => setCandidates(await window.desktopApi.listCaptureCompatCandidates()))}>Atualizar instâncias</button>
@@ -56,7 +57,7 @@ export function CaptureCompatSettings({ buttonStyle }: { buttonStyle: React.CSSP
         })}>Selecionar esta instância</button>
       </li>)}
     </ul>
-    {!candidates.length && <p>Atualize a lista para descobrir instâncias acessíveis. Nenhum processo é selecionado automaticamente.</p>}
+    {!candidates.length && <p>Atualize a lista para descobrir instâncias acessíveis. A descoberta não seleciona processos; o atalho pode selecionar uma instância única.</p>}
     {selected && <p style={{ overflowWrap: "anywhere" }}>Selecionado: PID {selected.pid} · {selected.arch}<br />Criado em {date(selected.created)}<br />{selected.path}</p>}
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
       <button style={buttonStyle} disabled={busy || !selected || selected.arch !== "x64" || state?.status === "unknown"} onClick={() => void perform(async () => setState(await window.desktopApi.enableCaptureCompat()))}>Habilitar compatibilidade</button>

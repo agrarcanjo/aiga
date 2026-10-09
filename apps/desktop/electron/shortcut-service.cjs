@@ -10,6 +10,9 @@ function createShortcutService(options) {
   const stealthWindowService = options.stealthWindowService;
   const emitRendererEvent = options.emitRendererEvent;
 
+  let registeredCompatShortcut = null;
+  let compatibilityPending = false;
+  let capturePending = false;
   let registeredCaptureShortcut = null;
   let registeredFullStealthShortcut = null;
   let registeredPushToTalkShortcut = null;
@@ -50,6 +53,8 @@ function createShortcutService(options) {
   }
 
   async function handleCaptureShortcut() {
+    if (capturePending) return;
+    capturePending = true;
     try {
       const item = await screenshotService.captureScreenshot({
         source: "full",
@@ -70,6 +75,10 @@ function createShortcutService(options) {
       logger.error("Global capture shortcut failed", {
         message: error instanceof Error ? error.message : "Unknown error"
       });
+    } finally {
+      capturePending = false;
+      restoreStealthVisibility("capture");
+      stealthWindowService.ensureVisibleOnTop?.();
     }
   }
 
@@ -156,6 +165,29 @@ function createShortcutService(options) {
     return registeredPushToTalkShortcut;
   }
 
+  async function handleCompatibilityShortcut() {
+    if (compatibilityPending) return;
+    compatibilityPending = true;
+    restoreStealthVisibility("compatibility");
+    stealthWindowService.ensureVisibleOnTop?.();
+    emitRendererEvent?.("capture-compat:result", { status: "installing", message: "Verificando compatibilidade Java…" });
+    try {
+      const result = await options.captureCompatService.enableFromShortcut();
+      emitRendererEvent?.("capture-compat:result", { status: result.status, message: result.message });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("Capture compatibility shortcut failed", { message });
+      emitRendererEvent?.("capture-compat:result", { status: "failed", message });
+    } finally { compatibilityPending = false; }
+  }
+
+  function registerCompatibilityShortcut() {
+    registeredCompatShortcut = unregisterIfRegistered(registeredCompatShortcut);
+    registeredCompatShortcut = registerShortcut(settingsStore.getPublicSettings().shortcuts.captureCompatibility,
+      () => { void handleCompatibilityShortcut(); }, "capture-compatibility");
+    return registeredCompatShortcut;
+  }
+
   function refreshShortcuts(options = {}) {
     const unavailable = [];
     function register(registerFn, label, settingKey) {
@@ -181,6 +213,7 @@ function createShortcutService(options) {
       captureShortcut: register(registerCaptureShortcut, "capture", "captureScreen"),
       fullStealthShortcut: register(registerFullStealthShortcut, "toggle-full-stealth", "toggleFullStealth"),
       pushToTalkShortcut: register(registerPushToTalkShortcut, "push-to-talk", "pushToTalk"),
+      compatibilityShortcut: register(registerCompatibilityShortcut, "capture-compatibility", "captureCompatibility"),
       unavailable
     };
   }
@@ -191,6 +224,7 @@ function createShortcutService(options) {
 
   function dispose() {
     globalShortcut.unregisterAll();
+    registeredCompatShortcut = null;
     registeredCaptureShortcut = null;
     registeredFullStealthShortcut = null;
     registeredPushToTalkShortcut = null;

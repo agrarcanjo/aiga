@@ -80,6 +80,9 @@ function showExistingWindow() {
 app.on("second-instance", showExistingWindow);
 
 function emitToAllWindows(channel, payload) {
+  if (channel === "chat:stream-event" || channel === "capture-compat:result") {
+    stealthWindowService?.ensureVisibleOnTop();
+  }
   BrowserWindow.getAllWindows().forEach((windowRef) => {
     windowRef.webContents.send(channel, payload);
   });
@@ -104,7 +107,8 @@ function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: true,
+      backgroundThrottling: false
     }
   });
 
@@ -142,7 +146,12 @@ function createWindow() {
       fullStealth: Boolean(stealthWindowService?.getState().fullStealth)
     });
   });
+  mainWindowRef.on("unresponsive", () => logger.warn("Main window unresponsive"));
+  mainWindowRef.on("responsive", () => logger.info("Main window responsive"));
+  const topTimer = setInterval(() => stealthWindowService?.ensureVisibleOnTop(), 1000);
+  topTimer.unref();
   mainWindowRef.on("closed", () => {
+    clearInterval(topTimer);
     mainWindowRef = undefined;
   });
 }
@@ -384,6 +393,7 @@ if (ownsInstance) app.whenReady().then(() => {
   });
 
   shortcutService = createShortcutService({
+    captureCompatService,
     logger,
     settingsStore,
     screenshotService,

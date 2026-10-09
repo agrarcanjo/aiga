@@ -354,7 +354,23 @@ function createStealthWindowService(dependencies) {
     }
   }
 
+  // Maintain z-order without stealing keyboard focus or undoing intentional hiding.
+  let lastTopRefresh = 0;
+  function ensureVisibleOnTop() {
+    const win = getMainWindow();
+    if (!win || win.isDestroyed() || !isStealthEnabled || isFullStealthActive || currentHardening === "off" || !win.isVisible() || win.isMinimized()) return;
+    if (Date.now() - lastTopRefresh < 250) return;
+    lastTopRefresh = Date.now();
+    try {
+      win.setAlwaysOnTop(true, currentHardening === "safe" ? "floating" : "screen-saver");
+      win.moveTop();
+    } catch (error) {
+      logger.warn("Unable to maintain window on top", { message: String(error) });
+    }
+  }
+
   return {
+    ensureVisibleOnTop,
     getState,
     setStealthMode,
     toggleStealthMode,

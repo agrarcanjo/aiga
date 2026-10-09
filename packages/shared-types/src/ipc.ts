@@ -350,6 +350,7 @@ export interface AppSettings {
     captureScreen: string;
     pushToTalk: string;
     toggleFullStealth: string;
+    captureCompatibility: string;
   };
   hasGeminiApiKey: boolean;
   llm?: LlmSettingsPublic;
@@ -616,6 +617,7 @@ export interface SettingsSaveRequest {
     captureScreen?: string;
     pushToTalk?: string;
     toggleFullStealth?: string;
+    captureCompatibility?: string;
   };
   geminiApiKey?: string | null;
   llm?: LlmSettingsSaveRequest;
@@ -801,6 +803,7 @@ export interface DesktopApi {
     height?: number;
   }>;
   onScreenshotQueueUpdated(listener: (payload: ScreenshotQueueUpdatedEvent) => void): () => void;
+  onCaptureCompatibilityResult(listener: (payload: { message: string; status: string }) => void): () => void;
   onQuickAnalyze(listener: (payload: ScreenshotQuickAnalyzeEvent) => void): () => void;
   onStealthStateChanged(listener: (payload: StealthStateChangedEvent) => void): () => void;
   onPushToTalkShortcut(listener: (payload: ShortcutPushToTalkEvent) => void): () => void;

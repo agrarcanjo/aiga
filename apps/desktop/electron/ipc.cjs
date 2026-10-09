@@ -92,6 +92,7 @@ const settingsSaveRequestSchema = z.object({
   selectedAudioInputDeviceLabel: z.string().max(256).nullable().optional(),
   shortcuts: z
     .object({
+      captureCompatibility: z.union([z.literal(""), z.string().min(3).max(40)]).optional(),
       captureScreen: z.union([z.literal(""), z.string().min(3).max(40)]).optional(),
       pushToTalk: z.union([z.literal(""), z.string().min(3).max(40)]).optional(),
       toggleFullStealth: z.union([z.literal(""), z.string().min(3).max(40)]).optional()
