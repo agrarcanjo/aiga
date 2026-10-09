@@ -43,6 +43,7 @@ export function CaptureCompatSettings({ buttonStyle }: { buttonStyle: React.CSSP
   return <section style={{ marginTop: 28, borderTop: "1px solid #444", paddingTop: 18, color: "#ddd", fontSize: 13 }}>
     <h3>Compatibilidade de captura — Java</h3>
     <p>Recurso opcional para todas as janelas de uma instância selecionada. Disponível para Windows x64.</p>
+    <p>Antes de capturar: atualize as instâncias, selecione o PID da aplicação Java e clique em Habilitar compatibilidade. O atalho de captura não habilita este recurso. Confira o estado e a afinidade observada das janelas antes de testar a imagem.</p>
     <button style={buttonStyle} disabled={busy} onClick={() => void perform(async () => setCandidates(await window.desktopApi.listCaptureCompatCandidates()))}>Atualizar instâncias</button>
     <ul style={{ paddingLeft: 18 }}>
       {candidates.map((candidate) => <li key={`${candidate.pid}:${candidate.created}`} style={{ marginTop: 12 }}>

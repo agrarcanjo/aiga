@@ -102,6 +102,7 @@ function createShortcutService(options) {
   }
 
   function registerShortcut(accelerator, handler, label) {
+    if (!accelerator || !accelerator.trim()) return null;
     const success = globalShortcut.register(accelerator, handler);
     if (!success) {
       throw new Error(`Unable to register global shortcut (${label}): ${accelerator}`);
@@ -133,7 +134,7 @@ function createShortcutService(options) {
 
   function registerFullStealthShortcut() {
     const settings = settingsStore.getPublicSettings();
-    const accelerator = settings.shortcuts.toggleFullStealth || "Ctrl+Shift+H";
+    const accelerator = settings.shortcuts.toggleFullStealth;
     registeredFullStealthShortcut = unregisterIfRegistered(registeredFullStealthShortcut);
     registeredFullStealthShortcut = registerShortcut(
       accelerator,
@@ -145,7 +146,7 @@ function createShortcutService(options) {
 
   function registerPushToTalkShortcut() {
     const settings = settingsStore.getPublicSettings();
-    const accelerator = settings.shortcuts.pushToTalk || "Ctrl+D";
+    const accelerator = settings.shortcuts.pushToTalk;
     registeredPushToTalkShortcut = unregisterIfRegistered(registeredPushToTalkShortcut);
     registeredPushToTalkShortcut = registerShortcut(
       accelerator,
@@ -155,19 +156,33 @@ function createShortcutService(options) {
     return registeredPushToTalkShortcut;
   }
 
-  function refreshShortcuts() {
-    try {
-      return {
-        captureShortcut: registerCaptureShortcut(),
-        fullStealthShortcut: registerFullStealthShortcut(),
-        pushToTalkShortcut: registerPushToTalkShortcut()
-      };
-    } catch (error) {
-      logger.error("Failed to refresh shortcuts", {
-        message: error instanceof Error ? error.message : "Unknown error"
-      });
-      throw error;
+  function refreshShortcuts(options = {}) {
+    const unavailable = [];
+    function register(registerFn, label, settingKey) {
+      try {
+        return registerFn();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        if (!options.allowUnavailable) {
+          logger.error("Failed to refresh shortcuts", { message });
+          throw error;
+        }
+        unavailable.push(label);
+        settingsStore.savePartial({ shortcuts: { [settingKey]: "" } });
+        logger.warn("Global shortcut unavailable; application will still open", {
+          label,
+          message,
+          action: "Escolha outra combinação em Configurações > Atalhos."
+        });
+        return null;
+      }
     }
+    return {
+      captureShortcut: register(registerCaptureShortcut, "capture", "captureScreen"),
+      fullStealthShortcut: register(registerFullStealthShortcut, "toggle-full-stealth", "toggleFullStealth"),
+      pushToTalkShortcut: register(registerPushToTalkShortcut, "push-to-talk", "pushToTalk"),
+      unavailable
+    };
   }
 
   function refreshCaptureShortcut() {

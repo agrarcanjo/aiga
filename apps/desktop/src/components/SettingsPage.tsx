@@ -234,7 +234,7 @@ export function SettingsPage({
     setDefaultCodeLanguage(r.settings.defaultCodeLanguage || "java");
     setCaptureShortcut(r.settings.shortcuts.captureScreen);
     setPushToTalkShortcut(r.settings.shortcuts.pushToTalk);
-    setFullStealthShortcut(r.settings.shortcuts.toggleFullStealth || "Ctrl+Shift+H");
+    setFullStealthShortcut(r.settings.shortcuts.toggleFullStealth ?? "");
     setSelectedDeviceId(r.settings.selectedAudioInputDeviceId || "");
     setSavedMicLabel(r.settings.selectedAudioInputDeviceLabel || "");
     const diag = await window.desktopApi.getDiagnostics();
@@ -701,6 +701,7 @@ export function SettingsPage({
                   <input
                     type="text"
                     value={value}
+                    placeholder="Sem atalho"
                     onChange={(e) => setter(e.target.value)}
                     style={{ ...is, marginTop: 4 }}
                   />
@@ -709,6 +710,7 @@ export function SettingsPage({
               <button type="button" style={pb} onClick={() => void saveShortcuts()}>
                 Salvar atalhos
               </button>
+              <span style={{ color: C.textMuted, fontSize: 12 }}>Deixe em branco para desativar. Atalhos indisponíveis na inicialização são removidos para você definir outra combinação.</span>
               {shortcutStatus && <span style={{ color: C.success, fontSize: 12 }}>{shortcutStatus}</span>}
             </div>
           )}

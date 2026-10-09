@@ -22,6 +22,8 @@
     "test:e2e": "corepack pnpm --filter @aiga/desktop test:e2e",
     "pack:win": "corepack pnpm --filter @aiga/desktop pack:win",
     "dist:win": "corepack pnpm --filter @aiga/desktop dist:win",
+    "dist:win:validation": "corepack pnpm --filter @aiga/desktop dist:win:validation",
+    "test:pack:win": "corepack pnpm --filter @aiga/desktop test:pack:win",
     "beta:gates": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/beta/run-beta-gates.ps1",
     "beta:triage:today": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/beta/start-triage-day.ps1",
     "beta:publish:check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/beta/publish-checklist.ps1"

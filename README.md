@@ -15,6 +15,9 @@ Bootstrap inicial do monorepo para o MVP desktop.
 
 ## Comandos
 
+Guia completo para gerar o `.exe`, instalar e diagnosticar abertura sem janela:
+[AIGA no Windows — gerar, instalar e abrir](docs/guia-build-windows.md).
+
 - corepack pnpm install
 - corepack pnpm dev
 - corepack pnpm build
@@ -24,6 +27,8 @@ Bootstrap inicial do monorepo para o MVP desktop.
 - corepack pnpm test:e2e
 - corepack pnpm pack:win
 - corepack pnpm dist:win
+- corepack pnpm dist:win:validation (instalador local com ícone padrão)
+- corepack pnpm test:pack:win (teste do executável empacotado; Node 22+)
 
 ## Guia pratico de primeira execucao (com Gemini API key)
 

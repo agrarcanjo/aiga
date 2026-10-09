@@ -1,5 +1,7 @@
 # Compatibilidade de captura Windows — implementação e operação
 
+Para comandos de geração do executável/instalador e diagnóstico de abertura sem janela, consulte [AIGA no Windows — gerar, instalar e abrir](guia-build-windows.md). O guia também acompanha o pacote em `resources/resources/guides/guia-build-windows.md`.
+
 ## Situação da entrega
 
 Recurso opcional implementado para **processos Windows x64**, protocolo 1, componentes nativos 1.0.0. O alvo deve ser escolhido explicitamente em **Configurações → Captura tela → Compatibilidade de captura — Java**. Não há ativação persistida, seleção por nome compartilhado, elevação automática, alteração de JAR/runtime, encerramento ou reinício do Java.

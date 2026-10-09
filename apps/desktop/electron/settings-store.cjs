@@ -318,10 +318,10 @@ function createSettingsStore() {
       selectedAudioInputDeviceId: raw.selectedAudioInputDeviceId || undefined,
       selectedAudioInputDeviceLabel: raw.selectedAudioInputDeviceLabel || undefined,
       shortcuts: {
-        captureScreen: raw.shortcuts?.captureScreen || DEFAULT_SETTINGS.shortcuts.captureScreen,
-        pushToTalk: raw.shortcuts?.pushToTalk || DEFAULT_SETTINGS.shortcuts.pushToTalk,
+        captureScreen: raw.shortcuts?.captureScreen ?? DEFAULT_SETTINGS.shortcuts.captureScreen,
+        pushToTalk: raw.shortcuts?.pushToTalk ?? DEFAULT_SETTINGS.shortcuts.pushToTalk,
         toggleFullStealth:
-          raw.shortcuts?.toggleFullStealth || DEFAULT_SETTINGS.shortcuts.toggleFullStealth
+          raw.shortcuts?.toggleFullStealth ?? DEFAULT_SETTINGS.shortcuts.toggleFullStealth
       },
       hasGeminiApiKey: Boolean(
         raw.geminiApiKeyEncrypted || raw.llmProviders?.gemini?.apiKeyEncrypted

@@ -1,0 +1,51 @@
+{
+  "version": "0.1.1",
+  "startedAt": "2026-10-09T00:17:17.016Z",
+  "cases": [
+    {
+      "name": "normal-startup",
+      "result": "passed",
+      "snapshot": {
+        "pid": 19824,
+        "version": "0.1.1",
+        "visible": true,
+        "count": 1,
+        "hwnd": "658342",
+        "url": "file:///C:/develop/branches/aiga/apps/desktop/release/0.1.1/win-unpacked/resources/app.asar/dist/index.html",
+        "text": "⠿\nAIGA\nLLM\n💾\n📷\n⚡\n📋\n🌐\n💬\n◑\n⛶\n⚙️\n↘\n⏻\n🤖\nFaça uma pergunta ou capture a tela\nAuto\nLeve\nBalanceado\nAlto\nPersonalizado\n🎤\n↑"
+      },
+      "affinity": {
+        "known": true,
+        "affinity": 17,
+        "error": 0
+      }
+    },
+    {
+      "name": "occupied-shortcut-startup",
+      "result": "passed",
+      "snapshot": {
+        "pid": 7156,
+        "version": "0.1.1",
+        "visible": true,
+        "count": 1,
+        "hwnd": "658308",
+        "url": "file:///C:/develop/branches/aiga/apps/desktop/release/0.1.1/win-unpacked/resources/app.asar/dist/index.html",
+        "text": "⠿\nAIGA\nLLM\n💾\n📷\n⚡\n📋\n🌐\n💬\n◑\n⛶\n⚙️\n↘\n⏻\n🤖\nFaça uma pergunta ou capture a tela\nAuto\nLeve\nBalanceado\nAlto\nPersonalizado\n🎤\n↑"
+      },
+      "affinity": {
+        "known": true,
+        "affinity": 17,
+        "error": 0
+      },
+      "log": "2026-10-08T21:17:23,542-03:00 | INFO | Retention purge scheduled | {\"intervalHours\":24}\n2026-10-08T21:17:23,711-03:00 | INFO | Application ready | {\"platform\":\"win32\",\"arch\":\"x64\",\"pid\":7156}\n2026-10-08T21:17:23,719-03:00 | WARN | Global shortcut unavailable; application will still open | {\"label\":\"capture\",\"message\":\"Unable to register global shortcut (capture): Ctrl+E\",\"action\":\"Escolha outra combinação em Configurações > Atalhos.\"}\n2026-10-08T21:17:23,722-03:00 | INFO | Registered global shortcut | {\"label\":\"toggle-full-stealth\",\"accelerator\":\"Ctrl+Shift+H\"}\n2026-10-08T21:17:23,727-03:00 | INFO | Registered global shortcut | {\"label\":\"push-to-talk\",\"accelerator\":\"Ctrl+D\"}\n2026-10-08T21:17:23,730-03:00 | INFO | Creating main browser window\n2026-10-08T21:17:23,798-03:00 | DEBUG | Content protection guard registered for window | {\"id\":1}\n2026-10-08T21:17:23,802-03:00 | DEBUG | Content protection guard registered for window | {\"id\":1}\n2026-10-08T21:17:23,804-03:00 | DEBUG | Loading renderer URL | {\"url\":\"file:///C:/develop/branches/aiga/apps/desktop/release/0.1.1/win-unpacked/resources/app.asar/dist/index.html\"}\n2026-10-08T21:17:23,825-03:00 | WARN | ffmpeg not ready — transcricao local pode falhar ate instalar | {\"path\":\"C:\\\\develop\\\\branches\\\\aiga\\\\apps\\\\desktop\\\\out\\\\packaged-startup\\\\2026-10-09T00-17-17-013Z\\\\conflict\\\\runtime\\\\ffmpeg\\\\ffmpeg.exe\",\"lastError\":\"\"}\n2026-10-08T21:17:24,189-03:00 | INFO | Content protection state changed | {\"enabled\":true,\"windows\":1}\n2026-10-08T21:17:24,208-03:00 | DEBUG | Stealth profile updated | {\"enabled\":true,\"fullStealth\":false,\"hardening\":\"safe\"}\n2026-10-08T21:17:24,211-03:00 | INFO | Main window ready | {\"visible\":true,\"fullStealth\":false}\n2026-10-08T21:17:24,215-03:00 | DEBUG | IPC settings:get\n2026-10-08T21:17:24,218-03:00 | DEBUG | IPC screenshot:queue:get\n2026-10-08T21:17:24,230-03:00 | DEBUG | IPC window:set-layout | {\"layout\":\"chat\",\"applied\":true,\"width\":520,\"height\":420}\n"
+    },
+    {
+      "name": "second-instance-activation",
+      "result": "passed",
+      "originalPid": 7156,
+      "secondExitCode": 0
+    }
+  ],
+  "guideIncluded": true,
+  "finishedAt": "2026-10-09T00:17:27.030Z"
+}

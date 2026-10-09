@@ -1,7 +1,7 @@
 {
   "name": "@aiga/desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -14,6 +14,8 @@
     "build:capture-compat": "powershell -NoProfile -ExecutionPolicy Bypass -File native/capture-compat/build.ps1",
     "test:capture-compat": "node native/capture-compat/test-native.cjs",
     "test:capture-compat-ui": "node native/capture-compat/test-ui.mjs",
+    "test:pack:win": "node scripts/test-packaged-startup.cjs",
+    "dist:win:validation": "pnpm pack:win && node scripts/build-validation-installer.cjs",
     "pack:win": "pnpm build:capture-compat && vite build && node electron/ci-sign-check.cjs && electron-builder --win --dir",
     "dist:win": "pnpm build:capture-compat && vite build && node electron/ci-sign-check.cjs && electron-builder --win --publish never"
   },
@@ -40,6 +42,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "../../docs/guia-build-windows.md",
+        "to": "resources/guides/guia-build-windows.md"
       }
     ],
     "win": {
