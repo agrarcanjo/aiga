@@ -29,7 +29,7 @@ test("top refresh respects full stealth, capture hiding, minimization and normal
     const { service, calls, minimize } = setup();
     service.setStealthMode({ enabled: true, hardening: "safe" });
     if (mode === "full") service.enterFullStealth();
-    if (mode === "capture") service.hideForExternalCapture();
+    if (mode === "capture") { service.setStealthMode({ enabled: false }); service.hideForExternalCapture(); }
     if (mode === "minimized") minimize();
     if (mode === "normal") service.setStealthMode({ enabled: false });
     calls.length = 0;
@@ -73,4 +73,23 @@ test("deferred top retries do not expose the agent in another capture or full st
     scheduled.forEach(callback => callback());
     assert.deepEqual(calls, [], action);
   }
+});
+
+test("stealth capture keeps AIGA visible and skips hide delay while preserving protection", () => {
+  const { service, calls } = setup();
+  service.setStealthMode({ enabled: true, hardening: "safe" });
+  calls.length = 0;
+  const snapshot = service.hideForExternalCapture();
+  assert.equal(snapshot.hiddenForCapture, false);
+  assert.equal(service.getWindowDiagnostics().visible, true);
+  assert.deepEqual(calls, [["protection", true]]);
+});
+test("non-stealth capture retains hiding and full stealth stays hidden", () => {
+  const { service } = setup();
+  assert.equal(service.hideForExternalCapture().hiddenForCapture, true);
+  assert.equal(service.getWindowDiagnostics().visible, false);
+  service.setStealthMode({ enabled: true, hardening: "safe" });
+  service.enterFullStealth();
+  assert.equal(service.hideForExternalCapture().hiddenForCapture, false);
+  assert.equal(service.getWindowDiagnostics().visible, false);
 });

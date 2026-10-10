@@ -215,7 +215,7 @@ function createScreenshotService(options) {
         ? stealthWindowService.hideForExternalCapture()
         : null;
 
-    if (windowSnapshot) {
+    if (windowSnapshot && windowSnapshot.hiddenForCapture !== false) {
       await delay(CAPTURE_HIDE_SETTLE_MS);
     }
 

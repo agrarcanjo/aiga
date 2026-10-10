@@ -297,7 +297,8 @@ function createStealthWindowService(dependencies) {
   }
 
   /**
-   * Oculta a janela antes de captura de tela para nao incluir o app AIGA no print.
+   * Em stealth, confia na proteção de captura sem ocultar a janela.
+   * Fora do stealth, mantém a ocultação para não incluir o AIGA no print.
    */
   function hideForExternalCapture() {
     presentationGeneration++;
@@ -314,6 +315,11 @@ function createStealthWindowService(dependencies) {
     };
 
     try {
+      if (isStealthEnabled && currentHardening !== "off") {
+        setContentProtection(windowRef, true);
+        logger.info?.("Screenshot window preparation", { strategy: "content-protection", hiddenForCapture: false, fullStealth: isFullStealthActive });
+        return { ...snapshot, hiddenForCapture: false };
+      }
       windowRef.hide();
       logger.debug("Window hidden for screenshot capture");
     } catch (error) {
@@ -323,7 +329,7 @@ function createStealthWindowService(dependencies) {
       return null;
     }
 
-    return snapshot;
+    return { ...snapshot, hiddenForCapture: true };
   }
 
   /**
