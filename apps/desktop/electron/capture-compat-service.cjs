@@ -26,6 +26,12 @@ const sameIdentity = (a, b) => a.pid === b.pid && a.created === b.created &&
 
 function resolveArtifacts(root) {
   const directory = path.join(root, "capture-compat", "x64");
+  for (const name of ["manifest.json", "aiga-capture-helper.exe", "aiga-capture-compat.dll"]) {
+    const artifactPath = path.join(directory, name);
+    if (!fs.existsSync(artifactPath)) throw Object.assign(new Error(
+      `Componente de compatibilidade ausente: ${artifactPath}. Restaure a pasta capture-compat/x64 completa do mesmo pacote. Em desenvolvimento, gere os componentes com corepack pnpm --filter @aiga/desktop build:capture-compat. Nenhuma operação foi enviada ao Java.`
+    ), { code: "ARTIFACTS_MISSING", stage: "artifacts", artifactPath, resourcesRoot: root });
+  }
   const manifest = JSON.parse(fs.readFileSync(path.join(directory, "manifest.json"), "utf8").replace(/^\uFEFF/, ""));
   if (manifest.protocol !== 1 || manifest.version !== "1.0.0" || manifest.arch !== "x64") throw new Error("Versão dos componentes nativos incompatível. Recompile ou reinstale o AIGA.");
   for (const name of ["aiga-capture-helper.exe", "aiga-capture-compat.dll"]) {
@@ -39,13 +45,14 @@ function createNativeRunner(root) {
   return (operation, identity, token) => new Promise((resolve, reject) => {
     let executable;
     try { executable = resolveArtifacts(root); }
-    catch (error) { reject(Object.assign(error, { stage: "artifacts", code: "ARTIFACTS" })); return; }
+    catch (error) { reject(Object.assign(error, { stage: "artifacts", code: error.code || "ARTIFACTS", resourcesRoot: root })); return; }
+    const startedAt = Date.now();
     const child = spawn(executable, [], { windowsHide: true, shell: false, stdio: ["pipe", "pipe", "pipe"] });
     let output = "", settled = false;
     const finish = (error, result) => {
       if (settled) return;
       settled = true; clearTimeout(timer);
-      if (error) reject(error); else resolve(result);
+      if (error) reject(Object.assign(error, { helperPid: child.pid, elapsedMs: Date.now() - startedAt, outputBytes: Buffer.byteLength(output), operation })); else resolve(result);
     };
     const timer = setTimeout(() => {
       // Only the helper is terminated. Its remote operation may still be running.
@@ -62,12 +69,12 @@ function createNativeRunner(root) {
         child.kill(); finish(Object.assign(new Error("Resposta nativa excedeu o limite."), { uncertain: true, stage: "protocol" }));
       }
     });
-    child.on("close", () => {
+    child.on("close", (exitCode, signal) => {
       try {
         const result = JSON.parse(output);
         if (result.protocol !== 1) throw new Error("Protocolo nativo incompatível.");
         finish(null, result);
-      } catch (error) { finish(Object.assign(error, { uncertain: true, stage: "communication" })); }
+      } catch (error) { finish(Object.assign(error, { uncertain: true, stage: "communication", exitCode, signal })); }
     });
     const input = operation === "list" ? "list\n" : `${operation}\n${identity.pid}\n${identity.created}\n${identity.path}\n${identity.arch}\n${token}\n`;
     // Token is passed through an inherited anonymous pipe, never command-line arguments or logs.
@@ -100,7 +107,10 @@ function createCaptureCompatService({ resourcesRoot, logger = { info() {} }, app
     uncertain ||= !!error.uncertain;
     state = { ...state, status: error.uncertain ? "unknown" : "failed", hookActive: null, verifiedAt: null,
       windows: [], operationId, stage: error.stage || "communication", error: error.code || "NATIVE", message: error.message };
-    logger.info("Capture compatibility failure", { operationId, stage: state.stage, error: state.error, pid: selected?.pid });
+    logger.info("Capture compatibility failure", { operationId, stage: state.stage, error: state.error, pid: selected?.pid,
+      message: error.message, resourcesRoot, artifactPath: error.artifactPath, operation: error.operation,
+      helperPid: error.helperPid, elapsedMs: error.elapsedMs, exitCode: error.exitCode, signal: error.signal, outputBytes: error.outputBytes,
+      uncertain, appVersion });
     if (error.code === 87 && (error.stage === "identity" || error.stage === "access")) {
       selected = null; token = ""; owned = false; uncertain = false; state.hookActive = false;
       state.message = "A sessão foi invalidada: o processo terminou ou sua identidade mudou. Atualize a lista e selecione uma instância atual.";
@@ -154,6 +164,17 @@ function createCaptureCompatService({ resourcesRoot, logger = { info() {} }, app
   }, pollMs) : null;
   timer?.unref();
   return {
+    preflight: () => {
+      try {
+        const helperPath = resolveArtifacts(resourcesRoot);
+        logger.info("Capture compatibility artifacts ready", { appVersion, resourcesRoot, helperPath });
+        return { ready: true };
+      } catch (error) {
+        logger.info("Capture compatibility artifacts unavailable", { appVersion, resourcesRoot,
+          code: error.code || "ARTIFACTS", stage: "artifacts", artifactPath: error.artifactPath, message: error.message });
+        return { ready: false, message: error.message };
+      }
+    },
     list: () => serialize(async () => {
       if (platform !== "win32") throw new Error("Compatibilidade de captura disponível apenas no Windows.");
       const result = await run("list");

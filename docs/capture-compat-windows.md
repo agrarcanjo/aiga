@@ -148,6 +148,14 @@ Esta entrega atende instalação em processo existente e não anuncia bloqueio d
 - [DisableThreadLibraryCalls e CRT estático](https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-disablethreadlibrarycalls)
 ## Ativação quando o Java ocupa a tela
 
+### Diagnóstico de componentes ausentes e janela coberta
+
+O erro `ARTIFACTS_MISSING` / `ENOENT ... manifest.json` significa que a operação não chegou ao Java. Em desenvolvimento, `apps/desktop/resources/capture-compat/x64` é gerada e ignorada pelo Git; clonar ou atualizar somente o código não fornece esses arquivos. Restaure a pasta completa de componentes da mesma distribuição (manifest.json, aiga-capture-helper.exe e aiga-capture-compat.dll), preservando seus hashes. Não crie um manifesto manualmente. A geração apenas dos componentes nativos, quando desejada pelo operador, usa `corepack pnpm --filter @aiga/desktop build:capture-compat`. Nenhum build foi executado durante esta correção.
+
+Ao iniciar, procure `Application ready` (versão, executable, appPath e packaged) e `Capture compatibility artifacts ready` ou `unavailable`. Ao pressionar Ctrl+Shift+J, procure `Capture compatibility shortcut started`, `completed` ou `failed`: o requestId correlaciona a tentativa, e o diagnóstico inclui duração, etapa, código, arquivo ausente e, quando disponível, resultado nativo. Tokens de controle, chaves de API, imagens e conteúdo de conversas não são adicionados a esses eventos.
+
+`AIGA window presentation` registra visible, minimized, alwaysOnTop, focused, bounds e estado do renderer. Esses campos não provam ausência de outra janela sobreposta. O atalho solicita restauração, reinserção no grupo de janelas superiores e foco; a manutenção periódica não rouba foco nem desfaz a ocultação intencional. Eventos unresponsive/responsive ajudam a distinguir falta de atualização de um problema de posição. Compartilhe o trecho desde a inicialização até a falha para correlacionar os eventos. O comportamento visual ainda precisa ser validado com o Java real.
+
 No código atualizado, abra o AIGA antes do Java e use **Ctrl+Shift+J** para habilitar a compatibilidade. A combinação pode ser alterada ou deixada em branco em Configurações → Atalhos. Se estiver ocupada na inicialização, fica em branco e o aplicativo continua abrindo.
 
 O atalho usa a seleção atual; sem seleção, só escolhe se a descoberta retornar exatamente uma instância Java. Com várias instâncias, selecione previamente a desejada. Sem Java aberto, o aviso pede abrir a aplicação e pressionar novamente. Não há monitoramento global ou ativação automática na inicialização. Repetir o atalho com a interceptação ativa apenas verifica seu estado.

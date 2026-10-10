@@ -4,6 +4,19 @@ const { createCaptureCompatService, registerCaptureCompatIpc } = require("./capt
 const identity = { pid: 42, created: "134000000000000000", path: "C:\\Java\\javaw.exe", arch: "x64" };
 const row = { hwnd: "123", threadId: 2, className: "Fixture", valid: true, before: 17, affinity: 0, queryError: 0, clearError: 0 };
 const result = (overrides = {}) => ({ protocol: 1, version: "1.0.0", loaded: true, initialized: true, hookActive: true, stable: true, overflow: false, error: 0, stage: "command", blocked: "12", observedAt: "134000000000000000", identity, windows: [row], ...overrides });
+test("missing artifacts are diagnosed at startup without dispatching native operations", () => {
+  const logs = [];
+  const service = createCaptureCompatService({ resourcesRoot: "missing-artifacts-test-directory", pollMs: 0,
+    logger: { info: (event, data) => logs.push({ event, data }) },
+    run: () => { assert.fail("must not run native commands during preflight"); } });
+  const result = service.preflight();
+  assert.equal(result.ready, false);
+  assert.match(result.message, /build:capture-compat/);
+  assert.equal(logs[0].data.code, "ARTIFACTS_MISSING");
+  assert.match(logs[0].data.artifactPath, /manifest.json$/);
+  assert.equal(service.snapshot().selected, null);
+  service.close();
+});
 test("shortcut discovers a unique Java and enables with verified evidence", async () => {
   const calls = [];
   const service = createCaptureCompatService({ platform: "win32", resourcesRoot: "unused", pollMs: 0,
@@ -114,10 +127,11 @@ test("missing or modified package artifacts fail before starting helper", () => 
   const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "aiga-capture-test-"));
   try {
-    assert.throws(() => resolveArtifacts(root), /ENOENT/);
+    assert.throws(() => resolveArtifacts(root), error => error.code === "ARTIFACTS_MISSING" && error.stage === "artifacts" && error.message.includes("Nenhuma operação"));
     const dir = path.join(root, "capture-compat", "x64"); fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ protocol: 1, version: "1.0.0", arch: "x64", sha256: {} }));
     fs.writeFileSync(path.join(dir, "aiga-capture-helper.exe"), "invalid");
+    fs.writeFileSync(path.join(dir, "aiga-capture-compat.dll"), "invalid");
     assert.throws(() => resolveArtifacts(root), /Integridade/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

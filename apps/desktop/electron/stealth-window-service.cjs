@@ -356,20 +356,42 @@ function createStealthWindowService(dependencies) {
 
   // Maintain z-order without stealing keyboard focus or undoing intentional hiding.
   let lastTopRefresh = 0;
-  function ensureVisibleOnTop() {
+  let lastDiagnosticAt = 0;
+  function getWindowDiagnostics() {
     const win = getMainWindow();
-    if (!win || win.isDestroyed() || !isStealthEnabled || isFullStealthActive || currentHardening === "off" || !win.isVisible() || win.isMinimized()) return;
-    if (Date.now() - lastTopRefresh < 250) return;
+    if (!win || win.isDestroyed()) return { available: false, ...getState() };
+    return { available: true, ...getState(), visible: win.isVisible(), minimized: win.isMinimized(),
+      alwaysOnTop: win.isAlwaysOnTop?.(), focused: win.isFocused?.(), bounds: win.getBounds?.(),
+      rendererLoading: win.webContents?.isLoading?.(), rendererCrashed: win.webContents?.isCrashed?.() };
+  }
+  function ensureVisibleOnTop({ force = false, reason = "maintenance" } = {}) {
+    const win = getMainWindow();
+    if (!win || win.isDestroyed()) return;
+    const before = force ? getWindowDiagnostics() : null;
+    if (!force && (!isStealthEnabled || isFullStealthActive || currentHardening === "off" || !win.isVisible() || win.isMinimized())) return;
+    if (!force && Date.now() - lastTopRefresh < 250) return;
     lastTopRefresh = Date.now();
     try {
-      win.setAlwaysOnTop(true, currentHardening === "safe" ? "floating" : "screen-saver");
+      if (force) {
+        if (win.isMinimized()) win.restore();
+        if (!win.isVisible()) win.showInactive();
+        // Reinsert the window in the topmost band for an explicit user gesture.
+        win.setAlwaysOnTop(false);
+      }
+      win.setAlwaysOnTop(true, "screen-saver");
       win.moveTop();
+      if (force) win.focus();
+      if (force || Date.now() - lastDiagnosticAt >= 60000) {
+        lastDiagnosticAt = Date.now();
+        logger.info?.("AIGA window presentation", { reason, force, before, after: getWindowDiagnostics() });
+      }
     } catch (error) {
-      logger.warn("Unable to maintain window on top", { message: String(error) });
+      logger.warn("Unable to maintain window on top", { reason, force, message: String(error), before });
     }
   }
 
   return {
+    getWindowDiagnostics,
     ensureVisibleOnTop,
     getState,
     setStealthMode,

@@ -146,8 +146,8 @@ function createWindow() {
       fullStealth: Boolean(stealthWindowService?.getState().fullStealth)
     });
   });
-  mainWindowRef.on("unresponsive", () => logger.warn("Main window unresponsive"));
-  mainWindowRef.on("responsive", () => logger.info("Main window responsive"));
+  mainWindowRef.on("unresponsive", () => logger.warn("Main window unresponsive", stealthWindowService?.getWindowDiagnostics()));
+  mainWindowRef.on("responsive", () => logger.info("Main window responsive", stealthWindowService?.getWindowDiagnostics()));
   const topTimer = setInterval(() => stealthWindowService?.ensureVisibleOnTop(), 1000);
   topTimer.unref();
   mainWindowRef.on("closed", () => {
@@ -165,6 +165,7 @@ if (ownsInstance) app.whenReady().then(() => {
     resourcesRoot: app.isPackaged ? path.join(process.resourcesPath, "resources") : path.join(__dirname, "../resources"),
     logger,
   });
+  captureCompatService.preflight();
   registerCaptureCompatIpc({ ipcMain: require("electron").ipcMain, service: captureCompatService, getMainWindow: () => mainWindowRef, trustedUrl: rendererUrl });
   app.on("before-quit", () => captureCompatService.close());
   settingsStoreRef = createSettingsStore();
@@ -402,6 +403,11 @@ if (ownsInstance) app.whenReady().then(() => {
   });
 
   logger.info("Application ready", {
+    appVersion: app.getVersion(),
+    packaged: app.isPackaged,
+    electronVersion: process.versions.electron,
+    executable: process.execPath,
+    appPath: app.getAppPath(),
     platform: process.platform,
     arch: process.arch,
     pid: process.pid

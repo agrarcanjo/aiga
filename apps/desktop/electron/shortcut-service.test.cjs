@@ -87,3 +87,16 @@ test("occupied compatibility shortcut is cleared without preventing startup", ()
   assert.equal(shortcuts.captureCompatibility, "");
   assert.equal(shortcuts.captureScreen, "Ctrl+E");
 });
+test("compatibility failure exposes actionable message and correlated diagnostic fields", async () => {
+  const { service, handlers, events, warnings } = harness({ compatibility: "Ctrl+Shift+J", enableFromShortcut: async () => {
+    throw Object.assign(new Error("Restaure os componentes"), { code: "ARTIFACTS_MISSING", stage: "artifacts", artifactPath: "missing/manifest.json" });
+  } });
+  service.refreshShortcuts({ allowUnavailable: true });
+  handlers["Ctrl+Shift+J"]();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(events.at(-1).payload.message, /Restaure os componentes/);
+  assert.equal(warnings[0][1].code, "ARTIFACTS_MISSING");
+  assert.equal(warnings[0][1].artifactPath, "missing/manifest.json");
+  assert.ok(warnings[0][1].requestId);
+  assert.equal(typeof warnings[0][1].elapsedMs, "number");
+});

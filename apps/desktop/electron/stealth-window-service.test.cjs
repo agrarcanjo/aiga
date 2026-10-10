@@ -37,3 +37,13 @@ test("top refresh respects full stealth, capture hiding, minimization and normal
     assert.deepEqual(calls, [], mode);
   }
 });
+test("explicit shortcut restores minimized window and reinserts it above other topmost windows", () => {
+  const { service, calls, minimize } = setup();
+  service.setStealthMode({ enabled: true, hardening: "safe" });
+  minimize();
+  calls.length = 0;
+  service.ensureVisibleOnTop({ force: true, reason: "compatibility-shortcut" });
+  assert.deepEqual(calls, [["top", false], ["top", true], ["move"], ["focus"]]);
+  assert.equal(service.getWindowDiagnostics().minimized, false);
+  assert.equal(service.getWindowDiagnostics().enabled, true);
+});
