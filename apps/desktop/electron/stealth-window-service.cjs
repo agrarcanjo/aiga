@@ -29,6 +29,8 @@ function createStealthWindowService(dependencies) {
   let isFullStealthActive = false;
   let currentHardening = "safe";
   let currentOpacity = 0.8;
+  let presentationGeneration = 0;
+  const schedule = dependencies.schedule || setTimeout;
 
   function buildState(appliedAtIso) {
     return {
@@ -106,6 +108,7 @@ function createStealthWindowService(dependencies) {
    * Oculta completamente a janela mantendo o modo stealth lógico ativo.
    */
   function applyFullStealthProfile(windowRef) {
+    presentationGeneration++;
     setContentProtection(windowRef, true);
     windowRef.setSkipTaskbar(true);
     windowRef.setAlwaysOnTop(false);
@@ -297,6 +300,7 @@ function createStealthWindowService(dependencies) {
    * Oculta a janela antes de captura de tela para nao incluir o app AIGA no print.
    */
   function hideForExternalCapture() {
+    presentationGeneration++;
     const windowRef = getMainWindow();
     if (!windowRef || windowRef.isDestroyed()) {
       return null;
@@ -343,6 +347,19 @@ function createStealthWindowService(dependencies) {
       } else {
         applyNormalProfile(windowRef);
       }
+      if (!snapshot.fullStealth) {
+        ensureVisibleOnTop({ force: true, reason: "capture-restored" });
+        const generation = ++presentationGeneration;
+        // Java may reorder its own window immediately after the capture completes.
+        for (const delayMs of [250, 1000]) {
+          const timer = schedule(() => {
+            if (generation !== presentationGeneration || getMainWindow() !== windowRef ||
+                windowRef.isDestroyed() || !windowRef.isVisible() || windowRef.isMinimized() || isFullStealthActive) return;
+            ensureVisibleOnTop({ force: true, focus: false, reason: `capture-restored-${delayMs}ms` });
+          }, delayMs);
+          timer?.unref?.();
+        }
+      }
       logger.debug("Window restored after screenshot capture", {
         fullStealth: snapshot.fullStealth,
         stealthEnabled: snapshot.enabled
@@ -364,7 +381,7 @@ function createStealthWindowService(dependencies) {
       alwaysOnTop: win.isAlwaysOnTop?.(), focused: win.isFocused?.(), bounds: win.getBounds?.(),
       rendererLoading: win.webContents?.isLoading?.(), rendererCrashed: win.webContents?.isCrashed?.() };
   }
-  function ensureVisibleOnTop({ force = false, reason = "maintenance" } = {}) {
+  function ensureVisibleOnTop({ force = false, focus = force, reason = "maintenance" } = {}) {
     const win = getMainWindow();
     if (!win || win.isDestroyed()) return;
     const before = force ? getWindowDiagnostics() : null;
@@ -380,7 +397,7 @@ function createStealthWindowService(dependencies) {
       }
       win.setAlwaysOnTop(true, "screen-saver");
       win.moveTop();
-      if (force) win.focus();
+      if (focus) win.focus();
       if (force || Date.now() - lastDiagnosticAt >= 60000) {
         lastDiagnosticAt = Date.now();
         logger.info?.("AIGA window presentation", { reason, force, before, after: getWindowDiagnostics() });
