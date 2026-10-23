@@ -101,6 +101,148 @@ export interface ChunkedCaptureController {
   stop: () => void;
 }
 
+const PCM_TARGET_RATE = 24000;
+const PCM_FRAME_MS = 100;
+
+// Roda na thread de áudio: mixa para mono, reamostra (linear) para 24 kHz e
+// entrega frames Int16 de 100 ms ao main thread.
+const PCM_WORKLET_SOURCE = `
+class PcmFrameProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    const opts = (options && options.processorOptions) || {};
+    this.targetRate = opts.targetRate || 24000;
+    this.frameSamples = Math.round(this.targetRate * (opts.frameMs || 100) / 1000);
+    this.ratio = sampleRate / this.targetRate;
+    this.frame = new Int16Array(this.frameSamples);
+    this.filled = 0;
+    this.position = 0;
+    this.last = 0;
+  }
+  process(inputs) {
+    const input = inputs[0];
+    if (!input || input.length === 0 || !input[0]) {
+      return true;
+    }
+    const channels = input.length;
+    const length = input[0].length;
+    const mono = new Float32Array(length);
+    for (let c = 0; c < channels; c += 1) {
+      const data = input[c];
+      for (let i = 0; i < length; i += 1) {
+        mono[i] += data[i] / channels;
+      }
+    }
+    while (this.position < length) {
+      const index = Math.floor(this.position);
+      const frac = this.position - index;
+      const a = index === 0 ? this.last : mono[index - 1];
+      const b = mono[index];
+      let sample = a + (b - a) * frac;
+      if (sample > 1) sample = 1;
+      else if (sample < -1) sample = -1;
+      this.frame[this.filled] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      this.filled += 1;
+      if (this.filled === this.frameSamples) {
+        const out = this.frame;
+        this.port.postMessage(out.buffer, [out.buffer]);
+        this.frame = new Int16Array(this.frameSamples);
+        this.filled = 0;
+      }
+      this.position += this.ratio;
+    }
+    this.position -= length;
+    this.last = mono[length - 1];
+    return true;
+  }
+}
+registerProcessor("pcm-frame-processor", PcmFrameProcessor);
+`;
+
+/**
+ * Captura contínua em PCM16 mono 24 kHz, em frames de 100 ms, para STT em streaming.
+ */
+export async function startPcmStreamCapture(options: {
+  mode: string;
+  onFrame: (pcm: ArrayBuffer) => void;
+}): Promise<ChunkedCaptureController> {
+  const { stream, audioStream } = await openCaptureStream(options.mode);
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtx) {
+    stopMediaStream(audioStream);
+    stopMediaStream(stream);
+    throw new Error("AudioContext indisponível para captura em streaming.");
+  }
+
+  const ctx = new AudioCtx();
+  const workletUrl = URL.createObjectURL(
+    new Blob([PCM_WORKLET_SOURCE], { type: "application/javascript" })
+  );
+  let node: AudioWorkletNode;
+  let source: MediaStreamAudioSourceNode;
+  let sink: GainNode;
+  try {
+    await ctx.audioWorklet.addModule(workletUrl);
+    source = ctx.createMediaStreamSource(audioStream);
+    node = new AudioWorkletNode(ctx, "pcm-frame-processor", {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      channelCountMode: "explicit",
+      channelCount: 2,
+      processorOptions: { targetRate: PCM_TARGET_RATE, frameMs: PCM_FRAME_MS },
+    });
+    // Saída muda: o nó precisa estar ligado ao destino para ser processado.
+    sink = ctx.createGain();
+    sink.gain.value = 0;
+    source.connect(node);
+    node.connect(sink);
+    sink.connect(ctx.destination);
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+  } catch (error) {
+    URL.revokeObjectURL(workletUrl);
+    void ctx.close().catch(() => undefined);
+    stopMediaStream(audioStream);
+    stopMediaStream(stream);
+    throw error instanceof Error
+      ? error
+      : new Error("Falha ao iniciar a captura de áudio em streaming.");
+  }
+  URL.revokeObjectURL(workletUrl);
+
+  let stopped = false;
+  node.port.onmessage = (ev: MessageEvent<ArrayBuffer>) => {
+    if (!stopped) {
+      options.onFrame(ev.data);
+    }
+  };
+
+  return {
+    stream: audioStream,
+    mode: options.mode,
+    stop: () => {
+      if (stopped) {
+        return;
+      }
+      stopped = true;
+      node.port.onmessage = null;
+      try {
+        source.disconnect();
+        node.disconnect();
+        sink.disconnect();
+      } catch {
+        // ignore
+      }
+      void ctx.close().catch(() => undefined);
+      stopMediaStream(audioStream);
+      stopMediaStream(stream);
+    },
+  };
+}
+
 /**
  * Grava a fonte em blocos independentes (cada bloco é um webm completo, decodificável pelo STT).
  */

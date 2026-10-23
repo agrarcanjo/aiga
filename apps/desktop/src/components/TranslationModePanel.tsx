@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
-  TranslationLanguageCode,
+  TranslationConnectionState,
   TranslationLineEvent,
   TranslationPrefs,
 } from "@clone-perssua/shared-types";
@@ -9,7 +9,7 @@ import {
   useMicrophoneLevel,
 } from "./AudioCaptureHud";
 import {
-  startChunkedCapture,
+  startPcmStreamCapture,
   type ChunkedCaptureController,
 } from "../lib/systemAudioCapture";
 
@@ -22,19 +22,8 @@ const C = {
   textMuted: "#888",
   error: "#ef4444",
   live: "#22c55e",
+  warn: "#f59e0b",
 };
-
-const LANG_OPTIONS: { value: TranslationLanguageCode; label: string }[] = [
-  { value: "auto", label: "Automático" },
-  { value: "en", label: "Inglês" },
-  { value: "pt", label: "Português" },
-  { value: "es", label: "Espanhol" },
-  { value: "fr", label: "Francês" },
-  { value: "de", label: "Alemão" },
-  { value: "it", label: "Italiano" },
-];
-
-const TARGET_OPTIONS = LANG_OPTIONS.filter((o) => o.value !== "auto");
 
 function Spinner(): JSX.Element {
   return (
@@ -55,6 +44,32 @@ function Spinner(): JSX.Element {
   );
 }
 
+function langLabel(code: string): string {
+  const map: Record<string, string> = {
+    auto: "Automático",
+    en: "Inglês",
+    pt: "Português",
+    es: "Espanhol",
+    fr: "Francês",
+    de: "Alemão",
+    it: "Italiano",
+  };
+  return map[code] || code;
+}
+
+const CONNECTION_LABEL: Record<TranslationConnectionState, string> = {
+  connecting: "conectando",
+  live: "ao vivo",
+  reconnecting: "reconectando",
+  error: "erro de conexão",
+  closed: "desconectado",
+};
+
+interface PartialEntry {
+  itemId: string;
+  text: string;
+}
+
 interface TranslationModePanelProps {
   stealthEnabled: boolean;
   expanded?: boolean;
@@ -65,109 +80,109 @@ export function TranslationModePanel({
   expanded = false,
 }: TranslationModePanelProps): JSX.Element {
   const [prefs, setPrefs] = useState<TranslationPrefs>({
-    sourceLanguage: "auto",
+    sourceLanguage: "en",
     targetLanguage: "pt",
     overlayFontSize: 14,
     overlayOpacity: 0.92,
     historyLines: 8,
-    overlayEnabled: true,
+    overlayEnabled: false,
   });
-  const [useCloud, setUseCloud] = useState(true);
-  const [consent, setConsent] = useState(false);
+  const [chatFontSize, setChatFontSize] = useState(14);
   const [consentTextVersion, setConsentTextVersion] = useState("");
-  const [consentText, setConsentText] = useState("");
   const [active, setActive] = useState(false);
-  const [captureMode, setCaptureMode] = useState("system_loopback");
-  const [captureDeviceId, setCaptureDeviceId] = useState("default");
+  const [captureMode, setCaptureMode] = useState<"microphone" | "system_loopback">(
+    "system_loopback"
+  );
   const [lines, setLines] = useState<TranslationLineEvent[]>([]);
-  const [avgLatencyMs, setAvgLatencyMs] = useState(0);
-  const [maxLatencyMs, setMaxLatencyMs] = useState(0);
+  const [partials, setPartials] = useState<PartialEntry[]>([]);
+  const [connection, setConnection] = useState<TranslationConnectionState>("closed");
+  const [firstPartialMs, setFirstPartialMs] = useState(0);
+  const [sttFinalMs, setSttFinalMs] = useState(0);
+  const [llmMs, setLlmMs] = useState(0);
   const [linesEmitted, setLinesEmitted] = useState(0);
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
-  const [preflightStatus, setPreflightStatus] = useState("");
+  const [saveStatus, setSaveStatus] = useState("");
+  const [floatingOverlay, setFloatingOverlay] = useState(false);
 
   const captureRef = useRef<ChunkedCaptureController | null>(null);
   const [captureStream, setCaptureStream] = useState<MediaStream | null>(null);
 
   const captureLevel = useMicrophoneLevel(captureStream, active, {
     mode: captureMode,
-    label: captureModeLabel(captureMode),
+    label: captureMode === "microphone" ? "Microfone" : "Saída do sistema",
   });
 
+  const applyStatus = useCallback(
+    (st: Awaited<ReturnType<typeof window.desktopApi.getTranslationSessionStatus>>) => {
+      setActive(st.active);
+      if (st.connection) setConnection(st.connection);
+      if (st.firstPartialMs !== undefined) setFirstPartialMs(st.firstPartialMs);
+      if (st.sttFinalMs !== undefined) setSttFinalMs(st.sttFinalMs);
+      if (st.llmMs !== undefined) setLlmMs(st.llmMs);
+      if (st.linesEmitted !== undefined) setLinesEmitted(st.linesEmitted);
+    },
+    []
+  );
+
   const loadPrefs = useCallback(async () => {
-    const [settingsRes, llmRes] = await Promise.all([
-      window.desktopApi.getSettings(),
-      window.desktopApi.getLlmSettings(),
-    ]);
+    const settingsRes = await window.desktopApi.getSettings();
     if (settingsRes.settings.translationPrefs) {
       setPrefs(settingsRes.settings.translationPrefs);
     }
+    setChatFontSize(settingsRes.settings.chatFontSize || 14);
     const ac = settingsRes.settings.audioCapture;
-    setCaptureMode(ac?.mode || "system_loopback");
-    setCaptureDeviceId(ac?.deviceId || "default");
-    setUseCloud(llmRes.llm.privacy.allowCloudProcessingForMeetings);
-    const st = await window.desktopApi.getTranslationSessionStatus();
-    setActive(st.active);
-    if (st.avgLatencyMs) setAvgLatencyMs(st.avgLatencyMs);
-    if (st.maxLatencyMs) setMaxLatencyMs(st.maxLatencyMs);
-    if (st.linesEmitted) setLinesEmitted(st.linesEmitted);
-  }, []);
-
-  function captureModeLabel(mode: string): string {
-    if (mode === "microphone") return "Microfone";
-    if (mode === "output_device") return "Dispositivo de saída específico";
-    return "Saída do sistema";
-  }
-
-  async function ensureCaptureReady(): Promise<{ mode: string; deviceId: string }> {
-    const settings = await window.desktopApi.getSettings();
-    let mode = settings.settings.audioCapture?.mode || "system_loopback";
-    let deviceId = settings.settings.audioCapture?.deviceId || "default";
-
-    if (mode === "output_device" && (!deviceId || deviceId === "")) {
-      mode = "system_loopback";
-      deviceId = "default";
-      await window.desktopApi.saveAudioCapture({ mode, deviceId });
-    }
-    if (mode === "system_loopback" && !deviceId) {
-      deviceId = "default";
-      await window.desktopApi.saveAudioCapture({ mode, deviceId });
-    }
-
-    setCaptureMode(mode);
-    setCaptureDeviceId(deviceId);
-    return { mode, deviceId };
-  }
+    setCaptureMode(ac?.mode === "microphone" ? "microphone" : "system_loopback");
+    applyStatus(await window.desktopApi.getTranslationSessionStatus());
+    const ov = await window.desktopApi.getTranslationOverlayVisible();
+    setFloatingOverlay(Boolean(ov.visible));
+  }, [applyStatus]);
 
   useEffect(() => {
     void loadPrefs();
     void window.desktopApi.getTranslationConsentText().then((r) => {
-      setConsentText(r.text);
       setConsentTextVersion(r.version);
     });
-    const unsub = window.desktopApi.onTranslationLine((line) => {
+  }, [loadPrefs]);
+
+  useEffect(() => {
+    const unsubPartial = window.desktopApi.onTranslationPartial((ev) => {
+      setPartials((prev) => {
+        const rest = prev.filter((p) => p.itemId !== ev.itemId);
+        if (!ev.text) {
+          return rest;
+        }
+        const idx = prev.findIndex((p) => p.itemId === ev.itemId);
+        if (idx === -1) {
+          return [...prev, { itemId: ev.itemId, text: ev.text }];
+        }
+        const next = prev.slice();
+        next[idx] = { itemId: ev.itemId, text: ev.text };
+        return next;
+      });
+    });
+    const unsubLine = window.desktopApi.onTranslationLine((line) => {
       setLines((prev) => [line, ...prev].slice(0, prefs.historyLines || 8));
-      setAvgLatencyMs(line.latencyMs);
+      if (line.itemId) {
+        setPartials((prev) => prev.filter((p) => p.itemId !== line.itemId));
+      }
+      if (line.sttMs !== undefined) setSttFinalMs(line.sttMs);
+      if (line.llmMs !== undefined) setLlmMs(line.llmMs);
     });
     const unsubError = window.desktopApi.onTranslationError((ev) => {
       setError(`${ev.code}: ${ev.message}`);
     });
     const poll = setInterval(() => {
-      void window.desktopApi.getTranslationSessionStatus().then((st) => {
-        setActive(st.active);
-        if (st.avgLatencyMs !== undefined) setAvgLatencyMs(st.avgLatencyMs);
-        if (st.maxLatencyMs !== undefined) setMaxLatencyMs(st.maxLatencyMs);
-        if (st.linesEmitted !== undefined) setLinesEmitted(st.linesEmitted);
-      });
-    }, 3000);
+      void window.desktopApi.getTranslationSessionStatus().then(applyStatus);
+    }, 2000);
     return () => {
-      unsub();
+      unsubPartial();
+      unsubLine();
       unsubError();
       clearInterval(poll);
     };
-  }, [loadPrefs, prefs.historyLines]);
+  }, [prefs.historyLines, applyStatus]);
 
   useEffect(
     () => () => {
@@ -183,31 +198,18 @@ export function TranslationModePanel({
     setCaptureStream(null);
   }
 
-  async function runPreflight(): Promise<boolean> {
-    setPreflightStatus("");
-    await ensureCaptureReady();
-    return true;
+  async function persistCaptureMode(
+    mode: "microphone" | "system_loopback"
+  ): Promise<void> {
+    await window.desktopApi.saveAudioCapture({ mode, deviceId: "" });
+    setCaptureMode(mode);
   }
 
-  async function startCaptureChunks(mode: string): Promise<void> {
-    const controller = await startChunkedCapture({
+  async function startStreaming(mode: string): Promise<void> {
+    const controller = await startPcmStreamCapture({
       mode,
-      timesliceMs: 6000,
-      onChunk: async (chunkBase64) => {
-        try {
-          const status = await window.desktopApi.getTranslationSessionStatus();
-          if (status?.sessionId) {
-            void window.desktopApi.saveMeetingAudioChunk({
-              sessionId: status.sessionId,
-              chunkBase64,
-              extension: "webm",
-              kind: "translation",
-            });
-          }
-          await window.desktopApi.ingestTranslationMicChunk({ chunkBase64 });
-        } catch {
-          // non-fatal
-        }
+      onFrame: (pcm) => {
+        window.desktopApi.sendTranslationAudioFrame(pcm);
       },
     });
     captureRef.current = controller;
@@ -220,29 +222,27 @@ export function TranslationModePanel({
     }
     setError("");
     setLines([]);
-    if (!consent) {
-      setError("Confirme o aviso legal antes de iniciar a tradução.");
-      return;
-    }
+    setPartials([]);
+    setFirstPartialMs(0);
+    setSttFinalMs(0);
+    setLlmMs(0);
     setStarting(true);
-    setPreflightStatus("Preparando captura de áudio…");
     try {
-      if (!(await runPreflight())) {
-        return;
-      }
-      await window.desktopApi.saveSettings({ translationPrefs: prefs });
-      setPreflightStatus("Iniciando sessão de tradução…");
+      await persistCaptureMode(captureMode);
+      const latest = await window.desktopApi.getSettings();
+      const nextPrefs = latest.settings.translationPrefs || prefs;
+      setPrefs(nextPrefs);
       const started = await window.desktopApi.startTranslationSession({
-        sourceLanguage: prefs.sourceLanguage,
-        targetLanguage: prefs.targetLanguage,
-        useCloud,
+        sourceLanguage: nextPrefs.sourceLanguage || "en",
+        targetLanguage: nextPrefs.targetLanguage || "pt",
         consentAccepted: true,
         consentTextVersion: consentTextVersion || undefined,
       });
       setActive(true);
+      setConnection("connecting");
+      setFloatingOverlay(false);
       try {
-        await startCaptureChunks(started.captureMode || captureMode);
-        setPreflightStatus("Captura ativa. Aguardando fala…");
+        await startStreaming(started.captureMode || captureMode);
       } catch (captureError) {
         await window.desktopApi.stopTranslationSession();
         setActive(false);
@@ -258,12 +258,75 @@ export function TranslationModePanel({
   async function handleStop(): Promise<void> {
     stopCapture();
     try {
+      if (floatingOverlay) {
+        await window.desktopApi.setTranslationOverlayVisible({ visible: false });
+        setFloatingOverlay(false);
+      }
       await window.desktopApi.stopTranslationSession();
       setActive(false);
+      setConnection("closed");
       setLines([]);
+      setPartials([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao parar");
     }
+  }
+
+  async function toggleFloatingOverlay(): Promise<void> {
+    const next = !floatingOverlay;
+    try {
+      await window.desktopApi.setTranslationOverlayVisible({ visible: next });
+      setFloatingOverlay(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao alternar overlay");
+    }
+  }
+
+  function handleCopy(): void {
+    void (async () => {
+      const text = lines
+        .slice()
+        .reverse()
+        .map((l) => (l.originalText ? `${l.originalText}\n${l.translatedText}` : l.translatedText))
+        .join("\n\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopyStatus("Copiado");
+        setTimeout(() => setCopyStatus(""), 1500);
+      } catch {
+        setCopyStatus("Falhou");
+      }
+    })();
+  }
+
+  function handleSaveConversation(): void {
+    if (lines.length === 0) {
+      return;
+    }
+    const body = lines
+      .slice()
+      .reverse()
+      .map((l) => {
+        const ts = l.emittedAtIso || "";
+        const orig = l.originalText ? `**Origem:** ${l.originalText}\n` : "";
+        return `### ${ts}\n${orig}**Tradução:** ${l.translatedText}\n`;
+      })
+      .join("\n");
+    const md =
+      `# Tradução ao vivo\n\n` +
+      `- Origem: ${prefs.sourceLanguage || "en"}\n` +
+      `- Destino: ${prefs.targetLanguage}\n` +
+      `- Gerado em: ${new Date().toISOString()}\n\n` +
+      body;
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `aiga-traducao-${new Date().toISOString().replace(/[:.]/g, "-")}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setSaveStatus("Salvo");
+    setTimeout(() => setSaveStatus(""), 1500);
   }
 
   const selectStyle = {
@@ -275,7 +338,26 @@ export function TranslationModePanel({
     width: "100%",
     fontSize: expanded ? 14 : 13,
     maxWidth: expanded ? 920 : undefined,
-  };
+    userSelect: "auto",
+    WebkitUserSelect: "auto",
+    WebkitAppRegion: "no-drag",
+  } as React.CSSProperties;
+
+  const iconBtn = (disabled?: boolean): React.CSSProperties => ({
+    background: C.surface2,
+    border: `1px solid ${C.border}`,
+    color: disabled ? C.textMuted : C.text,
+    padding: "6px 10px",
+    borderRadius: 6,
+    fontSize: 14,
+    cursor: disabled ? "not-allowed" : "pointer",
+    lineHeight: 1,
+  });
+
+  const showInlineCaptions = !floatingOverlay;
+  const connectionColor =
+    connection === "live" ? C.live : connection === "error" ? C.error : C.warn;
+  const fmtMs = (ms: number): string => (ms > 0 ? `${ms} ms` : "—");
 
   return (
     <div
@@ -286,7 +368,8 @@ export function TranslationModePanel({
         padding: "8px 0",
         flex: 1,
         minHeight: 0,
-      }}
+        WebkitAppRegion: "no-drag",
+      } as React.CSSProperties}
     >
       {active && (
         <div
@@ -295,15 +378,26 @@ export function TranslationModePanel({
             background: "#122a18",
             border: `1px solid ${C.live}`,
             borderRadius: 8,
-            fontSize: 12,
+            fontSize: 11,
             color: C.live,
             display: "flex",
-            justifyContent: "space-between",
+            flexDirection: "column",
+            gap: 4,
           }}
         >
-          <span>Tradução ao vivo{stealthEnabled ? " (stealth)" : ""}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+            <span>
+              Tradução ao vivo · {langLabel(prefs.sourceLanguage || "en")} →{" "}
+              {langLabel(prefs.targetLanguage)}
+              {stealthEnabled ? " (stealth)" : ""}
+            </span>
+            <span style={{ color: connectionColor, flexShrink: 0 }}>
+              ● {CONNECTION_LABEL[connection]} · {linesEmitted} linhas
+            </span>
+          </div>
           <span style={{ color: C.textMuted }}>
-            média {avgLatencyMs} ms · pico {maxLatencyMs} ms · {linesEmitted} linhas
+            parcial {fmtMs(firstPartialMs)} · frase {fmtMs(sttFinalMs)} · tradução{" "}
+            {fmtMs(llmMs)}
           </span>
         </div>
       )}
@@ -312,115 +406,36 @@ export function TranslationModePanel({
 
       {!active && (
         <>
-          <label style={{ color: C.textMuted, fontSize: 12 }}>Idioma origem</label>
+          <p style={{ color: C.textMuted, fontSize: 12, margin: 0, lineHeight: 1.45 }}>
+            {langLabel(prefs.sourceLanguage || "en")} → {langLabel(prefs.targetLanguage)}{" "}
+            (altere em Configurações → Tradução). A tradução segue a prioridade dos provedores
+            de IA.
+          </p>
+          <label style={{ color: C.textMuted, fontSize: 12 }}>Fonte de áudio</label>
           <select
-            value={prefs.sourceLanguage}
-            onChange={(e) =>
-              setPrefs({ ...prefs, sourceLanguage: e.target.value as TranslationLanguageCode })
-            }
+            value={captureMode}
+            onChange={(e) => {
+              const mode = e.target.value as "microphone" | "system_loopback";
+              setCaptureMode(mode);
+              void persistCaptureMode(mode);
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
             style={selectStyle}
           >
-            {LANG_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
+            <option value="system_loopback">Saída do sistema</option>
+            <option value="microphone">Microfone</option>
           </select>
-          <label style={{ color: C.textMuted, fontSize: 12 }}>Idioma destino</label>
-          <select
-            value={prefs.targetLanguage}
-            onChange={(e) =>
-              setPrefs({
-                ...prefs,
-                targetLanguage: e.target.value as TranslationLanguageCode,
-              })
-            }
-            style={selectStyle}
-          >
-            {TARGET_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <label style={{ display: "flex", gap: 8, fontSize: 12, color: C.text }}>
-            <input type="checkbox" checked={useCloud} onChange={(e) => setUseCloud(e.target.checked)} />
-            Traduzir na nuvem (senão usa LLM local se disponível)
-          </label>
-          <label style={{ display: "flex", gap: 8, fontSize: 12, color: C.text }}>
-            <input
-              type="checkbox"
-              checked={prefs.overlayEnabled !== false}
-              onChange={(e) => setPrefs({ ...prefs, overlayEnabled: e.target.checked })}
-            />
-            Overlay flutuante always-on-top
-          </label>
-          <label style={{ color: C.textMuted, fontSize: 12 }}>
-            Tamanho da fonte (overlay): {prefs.overlayFontSize}px
-          </label>
-          <input
-            type="range"
-            min={12}
-            max={24}
-            value={prefs.overlayFontSize}
-            onChange={(e) =>
-              setPrefs({ ...prefs, overlayFontSize: Number(e.target.value) })
-            }
-          />
-          <div
-            style={{
-              border: `1px solid ${C.border}`,
-              borderRadius: 8,
-              padding: expanded ? 12 : 10,
-              background: C.surface2,
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-            }}
-          >
-            <span style={{ color: C.text, fontSize: 12, fontWeight: 600 }}>Fonte de áudio</span>
-            <span style={{ color: C.textMuted, fontSize: 12 }}>
-              {captureModeLabel(captureMode)}
-              {captureMode !== "microphone"
-                ? ` · ${captureDeviceId === "default" || !captureDeviceId ? "Padrão do Windows" : captureDeviceId}`
-                : ""}
-            </span>
-            <p style={{ color: C.textMuted, fontSize: 11, margin: 0 }}>
-              Altere em Configurações → Captura áudio (mesmo lugar do ffmpeg). O padrão é a saída do
-              sistema — não precisa escolher dispositivo manualmente.
-            </p>
-          </div>
-          <pre
-            style={{
-              background: C.surface2,
-              border: `1px solid ${C.border}`,
-              padding: expanded ? 14 : 10,
-              borderRadius: 6,
-              fontSize: expanded ? 12 : 10,
-              color: C.textMuted,
-              whiteSpace: "pre-wrap",
-              margin: 0,
-              maxHeight: expanded ? 240 : 100,
-              overflow: "auto",
-            }}
-          >
-            {consentText || "Carregando aviso legal…"}
-          </pre>
-          <label style={{ display: "flex", gap: 8, fontSize: 12, color: C.text }}>
-            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            Li e aceito o aviso acima
-          </label>
           <button
             type="button"
-            disabled={!consent || starting}
+            disabled={starting}
             onClick={() => void handleStart()}
             style={{
-              background: consent && !starting ? C.accent : C.surface2,
+              background: !starting ? C.accent : C.surface2,
               border: "none",
               color: "#fff",
               padding: "10px 16px",
               borderRadius: 6,
-              cursor: consent && !starting ? "pointer" : "not-allowed",
+              cursor: !starting ? "pointer" : "not-allowed",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -428,97 +443,126 @@ export function TranslationModePanel({
             }}
           >
             {starting && <Spinner />}
-            {starting ? "Iniciando…" : "Iniciar legendas"}
+            {starting ? "Conectando…" : "Iniciar legendas"}
           </button>
         </>
       )}
 
       {active && (
-        <button
-          type="button"
-          onClick={() => void handleStop()}
-          style={{
-            background: C.surface2,
-            border: `1px solid ${C.error}`,
-            color: C.error,
-            padding: "8px 14px",
-            borderRadius: 6,
-            cursor: "pointer",
-          }}
-        >
-          Parar tradução
-        </button>
-      )}
-
-      {preflightStatus && !active && (
-        <p style={{ color: C.live, fontSize: 11, margin: 0 }}>{preflightStatus}</p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            type="button"
+            onClick={() => void handleStop()}
+            style={{
+              background: C.surface2,
+              border: `1px solid ${C.error}`,
+              color: C.error,
+              padding: "8px 14px",
+              borderRadius: 6,
+              cursor: "pointer",
+            }}
+          >
+            Parar tradução
+          </button>
+          <button
+            type="button"
+            title={
+              floatingOverlay
+                ? "Voltar legendas para o AIGA"
+                : "Abrir janela flutuante e ocultar legendas no AIGA"
+            }
+            onClick={() => void toggleFloatingOverlay()}
+            style={{
+              ...iconBtn(),
+              borderColor: floatingOverlay ? C.accent : C.border,
+              color: floatingOverlay ? C.accent : C.text,
+            }}
+          >
+            ⧉
+            <span style={{ fontSize: 11, marginLeft: 6 }}>
+              {floatingOverlay ? "Integrado" : "Flutuante"}
+            </span>
+          </button>
+        </div>
       )}
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <button
           type="button"
-          onClick={() => {
-            void (async () => {
-              const text = lines
-                .slice()
-                .reverse()
-                .map((l) => (l.originalText ? `${l.originalText}\n${l.translatedText}` : l.translatedText))
-                .join("\n\n");
-              try {
-                await navigator.clipboard.writeText(text);
-                setCopyStatus("Legendas copiadas.");
-              } catch {
-                setCopyStatus("Não foi possível copiar. Selecione o texto abaixo.");
-              }
-            })();
-          }}
+          title="Copiar legendas"
+          aria-label="Copiar legendas"
+          onClick={handleCopy}
           disabled={lines.length === 0}
-          style={{
-            background: C.surface2,
-            border: `1px solid ${C.border}`,
-            color: lines.length === 0 ? C.textMuted : C.text,
-            padding: "6px 10px",
-            borderRadius: 6,
-            fontSize: 11,
-            cursor: lines.length === 0 ? "not-allowed" : "pointer",
-          }}
+          style={iconBtn(lines.length === 0)}
         >
-          Copiar legendas
+          ⎘
+        </button>
+        <button
+          type="button"
+          title="Salvar conversa"
+          aria-label="Salvar conversa de tradução"
+          onClick={handleSaveConversation}
+          disabled={lines.length === 0}
+          style={iconBtn(lines.length === 0)}
+        >
+          ⬇
         </button>
         {copyStatus && <span style={{ color: C.textMuted, fontSize: 11 }}>{copyStatus}</span>}
+        {saveStatus && <span style={{ color: C.textMuted, fontSize: 11 }}>{saveStatus}</span>}
       </div>
 
-      <div
-        style={{
-          background: `rgba(26,26,26,${prefs.overlayOpacity})`,
-          border: `1px solid ${C.border}`,
-          borderRadius: 8,
-          padding: expanded ? 16 : 10,
-          maxHeight: expanded ? "none" : 220,
-          flex: expanded ? 1 : undefined,
-          minHeight: expanded ? 280 : undefined,
-          overflowY: "auto",
-          fontSize: expanded ? Math.max(prefs.overlayFontSize, 15) : prefs.overlayFontSize,
-          lineHeight: 1.45,
-          userSelect: "text",
-          WebkitUserSelect: "text",
-          cursor: "text",
-        }}
-      >
-        {lines.length === 0 && (
-          <p style={{ color: C.textMuted, fontSize: 11, margin: 0 }}>
-            {active ? "Aguardando fala…" : "Nenhuma legenda ainda."}
-          </p>
-        )}
-        {lines.map((line, idx) => (
-          <div key={`${line.emittedAtIso}-${idx}`} style={{ marginBottom: 10 }}>
-            {line.originalText && prefs.sourceLanguage !== "auto" && (
-              <p style={{ color: C.textMuted, margin: "0 0 4px", fontSize: 11 }}>{line.originalText}</p>
-            )}
-            <p style={{ color: C.text, margin: 0 }}>{line.translatedText}</p>
-          </div>
-        ))}
-      </div>
+      {showInlineCaptions && (
+        <div
+          style={{
+            background: `rgba(26,26,26,${prefs.overlayOpacity})`,
+            border: `1px solid ${C.border}`,
+            borderRadius: 8,
+            padding: expanded ? 16 : 10,
+            maxHeight: expanded ? "none" : 220,
+            flex: expanded ? 1 : undefined,
+            minHeight: expanded ? 280 : undefined,
+            overflowY: "auto",
+            fontSize: expanded ? Math.max(chatFontSize, 15) : chatFontSize,
+            lineHeight: 1.45,
+            userSelect: "text",
+            WebkitUserSelect: "text",
+            cursor: "text",
+          }}
+        >
+          {lines.length === 0 && partials.length === 0 && (
+            <p style={{ color: C.textMuted, fontSize: 11, margin: 0 }}>
+              {active ? "Aguardando fala…" : "Nenhuma legenda ainda."}
+            </p>
+          )}
+          {partials
+            .slice()
+            .reverse()
+            .map((p) => (
+              <p
+                key={`partial-${p.itemId}`}
+                style={{ color: C.textMuted, margin: "0 0 10px", fontStyle: "italic" }}
+              >
+                {p.text}
+              </p>
+            ))}
+          {lines.map((line, idx) => (
+            <div key={line.itemId || `${line.emittedAtIso}-${idx}`} style={{ marginBottom: 10 }}>
+              {line.originalText && (
+                <p style={{ color: C.textMuted, margin: "0 0 4px", fontSize: 11 }}>
+                  {line.originalText}
+                </p>
+              )}
+              <p style={{ color: C.text, margin: 0 }}>{line.translatedText}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {floatingOverlay && active && (
+        <p style={{ color: C.textMuted, fontSize: 11, margin: 0 }}>
+          Legendas no overlay flutuante. Use “Integrado” para voltar ao painel do AIGA.
+        </p>
+      )}
 
       {error && (
         <p

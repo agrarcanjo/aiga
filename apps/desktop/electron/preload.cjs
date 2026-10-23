@@ -213,7 +213,15 @@ contextBridge.exposeInMainWorld("desktopApi", {
   startTranslationSession: (payload) => ipcRenderer.invoke("translation:session:start", payload),
   stopTranslationSession: () => ipcRenderer.invoke("translation:session:stop"),
   getTranslationSessionStatus: () => ipcRenderer.invoke("translation:session:status"),
-  ingestTranslationMicChunk: (payload) => ipcRenderer.invoke("translation:chunk:ingest", payload),
+  sendTranslationAudioFrame: (buffer) => ipcRenderer.send("translation:audio:frame", buffer),
+  onTranslationPartial: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("translation:partial", wrapped);
+    return () => ipcRenderer.removeListener("translation:partial", wrapped);
+  },
+  setTranslationOverlayVisible: (payload) =>
+    ipcRenderer.invoke("translation:overlay:setVisible", payload),
+  getTranslationOverlayVisible: () => ipcRenderer.invoke("translation:overlay:getVisible"),
   onTranslationLine: (listener) => {
     const wrapped = (_event, payload) => listener(payload);
     ipcRenderer.on("translation:line", wrapped);

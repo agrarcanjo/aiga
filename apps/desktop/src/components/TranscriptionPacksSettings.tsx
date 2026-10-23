@@ -178,12 +178,19 @@ export function TranscriptionPacksSettings({
             : "Pendente: prepare o runtime com um clique"}
         </span>
         <span style={{ color: C.textMuted, fontSize: 11 }}>
-          whisper-cli: {data.engine.binaryReady ? "OK" : "ausente"}
+          whisper-cli: {data.engine.binaryReady ? "OK (com DLLs)" : "ausente / incompleto"}
           {" · "}
           modelo: {data.engine.modelReady ? "OK" : "ausente"}
           {" · "}
           PT/EN: {data.requiredInstalled ? "marcados" : "pendentes"}
         </span>
+        {!data.engine.binaryReady && (
+          <p style={{ color: C.warn, fontSize: 11, margin: 0 }}>
+            Se aparecer STT_STUB / código 3221225781, o exe está sem <code>whisper.dll</code>. Use
+            o botão abaixo para reinstalar o runtime completo em{" "}
+            <code>runtime/whisper/</code>.
+          </p>
+        )}
         {data.engine.modelPath && (
           <span style={{ color: C.textMuted, fontSize: 10 }}>
             Modelo ativo: <code>{data.engine.modelPath}</code>
@@ -203,6 +210,10 @@ export function TranscriptionPacksSettings({
       </div>
 
       <label style={{ color: C.textMuted, fontSize: 12 }}>Qualidade do modelo</label>
+      <p style={{ color: C.textMuted, fontSize: 11, margin: 0, lineHeight: 1.4 }}>
+        Para legendas ao vivo, use <strong>small</strong> (melhor equilíbrio qualidade/latência).{" "}
+        <strong>base</strong> é mais rápido e menos preciso; <strong>medium</strong> é mais lento.
+      </p>
       <select
         value={data.preferredModelTier}
         disabled={busy}

@@ -28,6 +28,9 @@ function createWhisperCliManager(options) {
   let status = "idle";
   let lastError = "";
   let lastRunAtIso = "";
+  /** Serializa transcrições (1 por vez) e permite warm-up do modelo. */
+  let runChain = Promise.resolve();
+  let warmedLanguage = "";
 
   function resolveBinaryPath() {
     const candidates = [
@@ -112,23 +115,43 @@ function createWhisperCliManager(options) {
     }
 
     if (!modelPath) {
+      const preferred = settingsStore?.getTranscriptionPacks?.()?.preferredModelTier;
+      const preferredKey =
+        preferred === "medium"
+          ? "whisper-medium"
+          : preferred === "small"
+            ? "whisper-small"
+            : "whisper";
+
       if (modelManager) {
-        const ensured = await modelManager.ensureModel("whisper");
-        if (ensured.state === "ready") {
-          modelPath = ensured.filePath;
+        const ensuredPreferred = await modelManager.ensureModel(preferredKey);
+        if (ensuredPreferred.state === "ready") {
+          modelPath = ensuredPreferred.filePath;
+        } else if (preferredKey !== "whisper") {
+          const ensuredBase = await modelManager.ensureModel("whisper");
+          if (ensuredBase.state === "ready") {
+            modelPath = ensuredBase.filePath;
+            logger.warn("Preferred Whisper model missing; falling back to base", {
+              preferred: preferredKey,
+              lastError: ensuredPreferred.lastError || ensuredPreferred.state
+            });
+          }
         }
       }
 
       if (!modelPath) {
         status = "unavailable";
-        lastError = "Modelo Whisper nao encontrado. Defina WHISPER_MODEL_PATH ou configure download via ModelManager.";
-        logger.warn("whisper model unavailable", { lastError });
+        lastError =
+          preferred === "medium"
+            ? "Modelo Whisper medio (pesado) nao encontrado. Baixe-o em Configuracoes > Traducao ou escolha base/small."
+            : "Modelo Whisper nao encontrado. Defina WHISPER_MODEL_PATH ou configure download via ModelManager.";
+        logger.warn("whisper model unavailable", { lastError, preferred });
         return getStatus();
       }
     }
 
     status = "ready";
-    return getStatus();
+    return { ...getStatus(), modelPath, binaryPath };
   }
 
   function getTempDir() {
@@ -234,41 +257,39 @@ function createWhisperCliManager(options) {
     return stderr.trim() || `whisper-cli exited with code ${code}`;
   }
 
-  async function transcribeChunk(params) {
-    const availability = await ensureAvailable();
-    if (availability.state !== "ready") {
-      throw new Error(availability.lastError || "Runtime Whisper indisponivel.");
-    }
+  /** WAV PCM 16 kHz mono silencioso — aquece page cache do modelo no SO. */
+  function createSilentWavBase64(durationSec = 0.35) {
+    const sampleRate = 16000;
+    const numSamples = Math.max(1, Math.floor(sampleRate * durationSec));
+    const dataSize = numSamples * 2;
+    const buffer = Buffer.alloc(44 + dataSize);
+    buffer.write("RIFF", 0);
+    buffer.writeUInt32LE(36 + dataSize, 4);
+    buffer.write("WAVE", 8);
+    buffer.write("fmt ", 12);
+    buffer.writeUInt32LE(16, 16);
+    buffer.writeUInt16LE(1, 20);
+    buffer.writeUInt16LE(1, 22);
+    buffer.writeUInt32LE(sampleRate, 24);
+    buffer.writeUInt32LE(sampleRate * 2, 28);
+    buffer.writeUInt16LE(2, 32);
+    buffer.writeUInt16LE(16, 34);
+    buffer.write("data", 36);
+    buffer.writeUInt32LE(dataSize, 40);
+    return buffer.toString("base64");
+  }
 
-    const written = writeChunkToTempFile(params.chunkBase64 || "");
-    const tempFiles = [written.filePath];
-    let audioPath = written.filePath;
-
-    try {
-      audioPath = await convertToWhisperWav(written.filePath);
-      tempFiles.push(audioPath);
-    } catch (error) {
-      if (!written.isWav) {
-        cleanupFiles(tempFiles);
-        status = "error";
-        lastError = error instanceof Error ? error.message : String(error);
-        throw new Error(lastError);
-      }
-    }
-
-    const binaryPath = availability.binaryPath;
-    const modelPath = availability.modelPath;
-    const language = params.language || "auto";
-
-    status = "running";
-    lastError = "";
-    lastRunAtIso = new Date().toISOString();
-
+  function runWhisperOnce({ binaryPath, modelPath, audioPath, language }) {
     return new Promise((resolve, reject) => {
-      const args = ["-m", modelPath, "-f", audioPath, "-otxt"];
-      if (language !== "auto") {
-        args.push("-l", language);
+      // -bs 1 / -nt: menor latência para legendas ao vivo.
+      const args = ["-m", modelPath, "-f", audioPath, "-otxt", "-nt", "-bs", "1"];
+      // Sempre fixar idioma quando conhecido — auto em clips curtos degrada qualidade.
+      const lang = language && language !== "auto" ? language : "";
+      if (lang) {
+        args.push("-l", lang);
       }
+      const cpuCount = Math.max(1, Math.min(4, os.cpus()?.length || 2));
+      args.push("-t", String(cpuCount));
 
       const child = spawn(binaryPath, args, {
         cwd: path.dirname(binaryPath),
@@ -282,36 +303,94 @@ function createWhisperCliManager(options) {
       child.stdout.on("data", (chunk) => {
         stdout += String(chunk || "");
       });
-
       child.stderr.on("data", (chunk) => {
         stderr += String(chunk || "");
       });
-
       child.on("error", (error) => {
-        status = "error";
-        lastError = error.message;
-        cleanupFiles(tempFiles);
         reject(error);
       });
-
       child.on("close", (code) => {
-        status = code === 0 ? "ready" : "error";
-        cleanupFiles(tempFiles);
-
         if (code !== 0) {
-          lastError = describeExitFailure(code, stderr, binaryPath);
-          logger.warn("whisper-cli run failed", { code, binaryPath, lastError });
-          reject(new Error(lastError));
+          reject(new Error(describeExitFailure(code, stderr, binaryPath)));
           return;
         }
-
-        const text = parseWhisperOutput(stdout);
-        resolve({
-          text,
-          isFinal: true
-        });
+        resolve(parseWhisperOutput(stdout));
       });
     });
+  }
+
+  async function transcribeChunkInner(params) {
+    const availability = await ensureAvailable();
+    if (availability.state !== "ready") {
+      throw new Error(availability.lastError || "Runtime Whisper indisponivel.");
+    }
+
+    const written = writeChunkToTempFile(params.chunkBase64 || "");
+    const tempFiles = [written.filePath];
+    let audioPath = written.filePath;
+
+    try {
+      if (!written.isWav) {
+        audioPath = await convertToWhisperWav(written.filePath);
+        tempFiles.push(audioPath);
+      }
+    } catch (error) {
+      if (!written.isWav) {
+        cleanupFiles(tempFiles);
+        status = "error";
+        lastError = error instanceof Error ? error.message : String(error);
+        throw new Error(lastError);
+      }
+    }
+
+    const binaryPath = availability.binaryPath;
+    const modelPath = availability.modelPath;
+    const language = params.language || "en";
+
+    status = "running";
+    lastError = "";
+    lastRunAtIso = new Date().toISOString();
+
+    try {
+      const text = await runWhisperOnce({ binaryPath, modelPath, audioPath, language });
+      status = "ready";
+      return { text, isFinal: true };
+    } catch (error) {
+      status = "error";
+      lastError = error instanceof Error ? error.message : String(error);
+      logger.warn("whisper-cli run failed", { binaryPath, lastError });
+      throw error;
+    } finally {
+      cleanupFiles(tempFiles);
+    }
+  }
+
+  function transcribeChunk(params) {
+    const job = runChain.then(() => transcribeChunkInner(params));
+    runChain = job.catch(() => undefined);
+    return job;
+  }
+
+  /**
+   * Executa um WAV silencioso para aquecer o binário/modelo (page cache).
+   * Chamado no início da sessão de tradução ao vivo.
+   */
+  async function warmUp(params = {}) {
+    const language = params.language && params.language !== "auto" ? params.language : "en";
+    if (warmedLanguage === language && status === "ready") {
+      return getStatus();
+    }
+    const availability = await ensureAvailable();
+    if (availability.state !== "ready") {
+      throw new Error(availability.lastError || "Runtime Whisper indisponivel.");
+    }
+    await transcribeChunk({
+      chunkBase64: createSilentWavBase64(0.35),
+      language
+    });
+    warmedLanguage = language;
+    logger.info("whisper-cli warmed up", { language, modelPath: availability.modelPath });
+    return getStatus();
   }
 
   function stop() {
@@ -323,6 +402,7 @@ function createWhisperCliManager(options) {
     ensureAvailable,
     getStatus,
     transcribeChunk,
+    warmUp,
     stop
   };
 }

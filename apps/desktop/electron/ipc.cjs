@@ -192,15 +192,11 @@ const meetingTranscriptAppendSchema = z.object({
 });
 
 const translationStartSchema = z.object({
-  sourceLanguage: z.enum(["auto", "pt", "en", "es", "fr", "de", "it"]),
+  /** Ignorado: a legenda ao vivo usa origem fixa em inglês. */
+  sourceLanguage: z.enum(["auto", "pt", "en", "es", "fr", "de", "it"]).optional(),
   targetLanguage: z.enum(["pt", "en", "es", "fr", "de", "it"]),
-  useCloud: z.boolean(),
   consentAccepted: z.literal(true),
   consentTextVersion: z.string().max(64).optional()
-});
-
-const translationMicChunkSchema = z.object({
-  chunkBase64: z.string().min(1).max(12_000_000)
 });
 
 const llmProviderTestSchema = z.object({
@@ -322,6 +318,7 @@ function setupIpcHandlers(dependencies) {
   const tokenUsageTracker = dependencies?.tokenUsageTracker;
   const meetingOrchestrator = dependencies?.meetingOrchestrator;
   const translationSession = dependencies?.translationSession;
+  const translationOverlayWindow = dependencies?.translationOverlayWindow;
   const audioLoopbackCapture = dependencies?.audioLoopbackCapture;
   const contextStore = dependencies?.contextStore;
   const consentAuditStore = dependencies?.consentAuditStore;
@@ -1117,9 +1114,12 @@ function setupIpcHandlers(dependencies) {
       return { ok: false, message: "Registry indisponivel.", testedAtIso: new Date().toISOString() };
     }
     try {
-      const route = settingsStore.getLlmRouting();
       const modelId =
         parsed.modelId || settingsStore.getPublicLlmSettings().providers[parsed.providerId].defaultModelId;
+      if (typeof llmProviderRegistry.checkProvider === "function") {
+        const result = await llmProviderRegistry.checkProvider(parsed.providerId, modelId, parsed.apiKey);
+        return { ...result, testedAtIso: new Date().toISOString() };
+      }
       await llmProviderRegistry.testProvider(parsed.providerId, modelId, parsed.apiKey);
       return { ok: true, message: "Conexao OK.", testedAtIso: new Date().toISOString() };
     } catch (error) {
@@ -1300,10 +1300,36 @@ function setupIpcHandlers(dependencies) {
 
     ipcMain.handle("translation:session:status", async () => translationSession.getStatus());
 
-    ipcMain.handle("translation:chunk:ingest", async (_event, payload) => {
-      const parsed = translationMicChunkSchema.parse(payload);
-      return translationSession.ingestMicChunk(parsed.chunkBase64);
+    // Fire-and-forget: um frame PCM16 de 100 ms a cada envio, sem ida e volta.
+    ipcMain.on("translation:audio:frame", (_event, payload) => {
+      let bytes = null;
+      if (payload instanceof ArrayBuffer) {
+        bytes = Buffer.from(payload);
+      } else if (ArrayBuffer.isView(payload)) {
+        bytes = Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength);
+      }
+      if (!bytes || bytes.length === 0 || bytes.length > 64 * 1024 || bytes.length % 2 !== 0) {
+        return;
+      }
+      translationSession.ingestAudioFrame(bytes);
     });
+
+    ipcMain.handle("translation:overlay:setVisible", async (_event, payload) => {
+      const visible = z.boolean().parse(payload?.visible);
+      if (!translationOverlayWindow) {
+        return { visible: false };
+      }
+      if (visible) {
+        translationOverlayWindow.show({ clear: true });
+      } else {
+        translationOverlayWindow.hide();
+      }
+      return { visible: translationOverlayWindow.isVisible() };
+    });
+
+    ipcMain.handle("translation:overlay:getVisible", async () => ({
+      visible: Boolean(translationOverlayWindow?.isVisible?.())
+    }));
   }
 
   ipcMain.handle("app:quit", () => {

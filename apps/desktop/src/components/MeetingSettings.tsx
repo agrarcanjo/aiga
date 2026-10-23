@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import type {
-  LlmCloudProviderId,
   LlmSettingsPublic,
   MeetingPrefs,
   MeetingSessionMode,
@@ -60,11 +59,6 @@ export function MeetingSettings({
       .filter(Boolean);
     await Promise.all([
       window.desktopApi.saveLlmSettings({
-        routing: {
-          meetingSummary: llm.routing.meetingSummary,
-          meetingActiveClassifier: llm.routing.meetingActiveClassifier,
-          translation: llm.routing.translation,
-        },
         privacy: llm.privacy,
       }),
       window.desktopApi.saveSettings({
@@ -82,48 +76,26 @@ export function MeetingSettings({
     return <p style={{ color: C.textMuted, fontSize: 12 }}>Carregando…</p>;
   }
 
-  function routingSelect(
-    key: "meetingSummary" | "meetingActiveClassifier" | "translation",
-    label: string,
-    description: string
-  ): JSX.Element {
-    const route = llm!.routing[key];
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <span style={{ color: C.text, fontSize: 13, fontWeight: 600 }}>{label}</span>
-        <span style={{ color: C.textMuted, fontSize: 11, marginBottom: 4 }}>{description}</span>
-        <select
-          value={route.providerId}
-          onChange={(e) =>
-            setLlm({
-              ...llm!,
-              routing: {
-                ...llm!.routing,
-                [key]: {
-                  ...route,
-                  providerId: e.target.value as LlmCloudProviderId | "local",
-                },
-              },
-            })
-          }
-          style={inputStyle}
-        >
-          <option value="gemini">Gemini</option>
-          <option value="openai">OpenAI</option>
-          <option value="anthropic">Anthropic</option>
-          <option value="local">Local</option>
-        </select>
-      </div>
-    );
-  }
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <p style={{ color: C.textMuted, fontSize: 12, margin: 0, lineHeight: 1.5 }}>
-        Preferências do modo reunião: privacidade na nuvem e roteamento de modelos para resumo e
-        classificação ativa. Para entrevista técnica, use o template &quot;Entrevista técnica&quot; no
-        wizard da reunião e configure o perfil/contexto abaixo.
+        Preferências do modo reunião e privacidade. O provedor LLM (resumo, classificador e tradução)
+        segue a <strong>prioridade global</strong> em Configurações → IA e modelos.
       </p>
+
+      <div
+        style={{
+          border: `1px solid ${C.border}`,
+          borderRadius: 8,
+          padding: 12,
+          color: C.textMuted,
+          fontSize: 11,
+          lineHeight: 1.45,
+        }}
+      >
+        Resumo de reunião, modo ativo e tradução ao vivo usam a mesma lista de prioridade de
+        provedores. Se o primeiro falhar e o fallback estiver ativo, o app tenta o próximo.
+      </div>
 
       <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
         <span style={{ color: C.text, fontSize: 13, fontWeight: 600 }}>Modo reunião ativo (padrão)</span>
@@ -183,24 +155,6 @@ export function MeetingSettings({
           </span>
         </span>
       </label>
-
-      <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14, display: "flex", flexDirection: "column", gap: 14 }}>
-        {routingSelect(
-          "meetingSummary",
-          "Modelo para resumo de reunião",
-          "Usado ao encerrar uma sessão no modo observador."
-        )}
-        {routingSelect(
-          "meetingActiveClassifier",
-          "Modelo para modo reunião ativo",
-          "Classificação e sugestões durante a reunião (quando disponível)."
-        )}
-        {routingSelect(
-          "translation",
-          "Modelo para tradução ao vivo",
-          "Usado no modo legendas (G4)."
-        )}
-      </div>
 
       <label style={{ fontSize: 12, color: C.textMuted }}>
         Retenção de dados (dias): {llm.privacy.retentionDays}

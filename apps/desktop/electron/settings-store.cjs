@@ -8,7 +8,8 @@ const {
   DEFAULT_PRIVACY,
   DEFAULT_MODEL_SELECTION,
   DEFAULT_LLM_PROVIDERS,
-  replaceDeprecatedModelId
+  replaceDeprecatedModelId,
+  normalizeProviderPriority
 } = require("./llm-defaults.cjs");
 const {
   DEFAULT_CODE_LANGUAGE,
@@ -94,6 +95,7 @@ const DEFAULT_SETTINGS = {
   quickScreenshotAnalysis: true,
   defaultCodeLanguage: DEFAULT_CODE_LANGUAGE,
   nonStealthModeEnabled: false,
+  chatFontSize: 14,
   selectedAudioInputDeviceId: "",
   selectedAudioInputDeviceLabel: "",
   shortcuts: {
@@ -117,7 +119,7 @@ const DEFAULT_SETTINGS = {
   },
   transcriptionPacks: {
     installedLanguageIds: [],
-    preferredModelTier: "base"
+    preferredModelTier: "small"
   },
   meetingPrefs: {
     defaultMode: "passive",
@@ -125,12 +127,14 @@ const DEFAULT_SETTINGS = {
     questionOnlyMode: false
   },
   translationPrefs: {
-    sourceLanguage: "auto",
+    sourceLanguage: "en",
     targetLanguage: "pt",
     overlayFontSize: 14,
     overlayOpacity: 0.92,
     historyLines: 8,
-    overlayEnabled: true
+    realtimeModel: "gpt-realtime-1.5",
+    transcriptionModel: "gpt-4o-mini-transcribe",
+    overlayEnabled: false
   },
   autoUpdate: {
     enabled: false,
@@ -316,6 +320,7 @@ function createSettingsStore() {
       quickScreenshotAnalysis: raw.quickScreenshotAnalysis !== false,
       defaultCodeLanguage: normalizeCodeLanguage(raw.defaultCodeLanguage),
       nonStealthModeEnabled: Boolean(raw.nonStealthModeEnabled),
+      chatFontSize: Math.min(28, Math.max(11, Number(raw.chatFontSize) || DEFAULT_SETTINGS.chatFontSize)),
       selectedAudioInputDeviceId: raw.selectedAudioInputDeviceId || undefined,
       selectedAudioInputDeviceLabel: raw.selectedAudioInputDeviceLabel || undefined,
       shortcuts: {
@@ -441,15 +446,49 @@ function createSettingsStore() {
       routing: { ...migrated.llmRouting },
       tokenBudget: { ...migrated.tokenBudget },
       privacy: { ...migrated.privacy },
-      selection: {
-        ...DEFAULT_MODEL_SELECTION,
-        ...(migrated.modelSelection || {}),
-        customRoute: {
-          ...DEFAULT_MODEL_SELECTION.customRoute,
-          ...(migrated.modelSelection?.customRoute || {})
-        }
+      selection: normalizeModelSelection(migrated.modelSelection)
+    };
+  }
+
+  function normalizeAutoRoutes(raw) {
+    const tasks = [
+      "simple_text",
+      "complex_reasoning",
+      "code",
+      "screenshot_general",
+      "screenshot_code",
+      "screenshot_error",
+      "aws_exam_screenshot",
+      "audio_question",
+      "meeting_summary",
+      "meeting_classifier",
+      "translation"
+    ];
+    const providers = ["openai", "gemini", "anthropic", "local"];
+    const routes = {};
+    for (const task of tasks) {
+      const route = raw?.[task];
+      const modelId = typeof route?.modelId === "string" ? route.modelId.trim() : "";
+      if (!modelId || !providers.includes(route?.providerId)) continue;
+      routes[task] = { providerId: route.providerId, modelId };
+    }
+    return routes;
+  }
+
+  function normalizeModelSelection(partial) {
+    const merged = {
+      ...DEFAULT_MODEL_SELECTION,
+      ...(partial || {}),
+      customRoute: {
+        ...DEFAULT_MODEL_SELECTION.customRoute,
+        ...(partial?.customRoute || {})
       }
     };
+    merged.autoRoutes = normalizeAutoRoutes(partial?.autoRoutes);
+    merged.providerPriority = normalizeProviderPriority(merged);
+    merged.preferredProvider = merged.providerPriority[0] || "openai";
+    merged.allowFallback = merged.allowFallback !== false;
+    return merged;
   }
 
   function getPublicLlmSettings() {
@@ -625,8 +664,7 @@ function createSettingsStore() {
         next.privacy = { ...DEFAULT_PRIVACY, ...next.privacy, ...partial.llm.privacy };
       }
       if (partial.llm.selection) {
-        next.modelSelection = {
-          ...DEFAULT_MODEL_SELECTION,
+        next.modelSelection = normalizeModelSelection({
           ...(next.modelSelection || {}),
           ...partial.llm.selection,
           customRoute: {
@@ -634,7 +672,7 @@ function createSettingsStore() {
             ...(next.modelSelection?.customRoute || {}),
             ...(partial.llm.selection.customRoute || {})
           }
-        };
+        });
       }
     }
 
@@ -648,6 +686,10 @@ function createSettingsStore() {
 
     if (Object.prototype.hasOwnProperty.call(partial, "nonStealthModeEnabled")) {
       next.nonStealthModeEnabled = Boolean(partial.nonStealthModeEnabled);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(partial, "chatFontSize")) {
+      next.chatFontSize = Math.min(28, Math.max(11, Number(partial.chatFontSize) || DEFAULT_SETTINGS.chatFontSize));
     }
 
     if (Object.prototype.hasOwnProperty.call(partial, "defaultCodeLanguage")) {

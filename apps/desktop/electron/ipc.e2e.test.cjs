@@ -27,9 +27,13 @@ function createHarness(options = {}) {
   let meetingRecording = false;
   let translationActive = false;
 
+  const listeners = new Map();
   const ipcMainMock = {
     handle(channel, handler) {
       handlers.set(channel, handler);
+    },
+    on(channel, listener) {
+      listeners.set(channel, listener);
     }
   };
 
@@ -136,7 +140,11 @@ function createHarness(options = {}) {
       avgLatencyMs: 1200,
       linesEmitted: 2
     }),
-    ingestMicChunk: async () => ({ ok: true }),
+    receivedFrames: [],
+    ingestAudioFrame(bytes) {
+      this.receivedFrames.push(bytes);
+      return true;
+    },
     isActive: () => translationActive
   };
 
@@ -345,8 +353,15 @@ function createHarness(options = {}) {
     return handler({}, payload);
   }
 
+  function send(channel, payload) {
+    const listener = listeners.get(channel);
+    assert.ok(listener, `Listener nao registrado: ${channel}`);
+    listener({}, payload);
+  }
+
   return {
     invoke,
+    send,
     rendererEvents,
     dependencies
   };
@@ -460,12 +475,17 @@ test("E2E IPC meeting: dismiss alerta ativo", async () => {
 test("E2E IPC translation: start e stop", async () => {
   const harness = createHarness();
   const started = await harness.invoke("translation:session:start", {
-    sourceLanguage: "en",
     targetLanguage: "pt",
-    useCloud: true,
     consentAccepted: true
   });
   assert.equal(started.sessionId, "trans-1");
+
+  const frames = harness.dependencies.translationSession.receivedFrames;
+  harness.send("translation:audio:frame", new Uint8Array(4800).buffer);
+  harness.send("translation:audio:frame", new Uint8Array(3).buffer);
+  harness.send("translation:audio:frame", new Uint8Array(0).buffer);
+  assert.equal(frames.length, 1);
+  assert.equal(frames[0].length, 4800);
 
   const status = await harness.invoke("translation:session:status");
   assert.equal(status.active, true);
@@ -486,9 +506,7 @@ test("E2E IPC: traducao bloqueada com reuniao ativa", async () => {
   await assert.rejects(
     () =>
       harness.invoke("translation:session:start", {
-        sourceLanguage: "auto",
         targetLanguage: "pt",
-        useCloud: false,
         consentAccepted: true
       }),
     /reuniao/
@@ -552,9 +570,7 @@ test("E2E IPC translation: exige consentAccepted", async () => {
   await assert.rejects(
     () =>
       harness.invoke("translation:session:start", {
-        sourceLanguage: "en",
-        targetLanguage: "pt",
-        useCloud: false
+        targetLanguage: "pt"
       }),
     /consentAccepted/
   );
@@ -581,4 +597,32 @@ test("E2E IPC usage:tokens:daily", async () => {
   });
   const daily = await harness.invoke("usage:tokens:daily");
   assert.equal(daily.totalTokens, 150);
+});
+
+test("E2E IPC llm:providers:test devolve keyValid quando só o modelo falha", async () => {
+  const calls = [];
+  const harness = createHarness({
+    llmProviderRegistry: {
+      resolveRoute: () => ({ providerId: "gemini", modelId: "gemini-3.8-flash" }),
+      checkProvider: async (providerId, modelId, apiKey) => {
+        calls.push([providerId, modelId, apiKey]);
+        return {
+          ok: false,
+          keyValid: true,
+          modelOk: false,
+          message: "Chave válida, mas o modelo gemini-2.5-flash falhou: 404"
+        };
+      }
+    }
+  });
+  const result = await harness.invoke("llm:providers:test", {
+    providerId: "gemini",
+    modelId: "gemini-2.5-flash",
+    apiKey: "AIza-nova"
+  });
+  assert.deepEqual(calls, [["gemini", "gemini-2.5-flash", "AIza-nova"]]);
+  assert.equal(result.ok, false);
+  assert.equal(result.keyValid, true);
+  assert.equal(result.modelOk, false);
+  assert.ok(result.testedAtIso);
 });

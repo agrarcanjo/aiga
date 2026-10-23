@@ -59,11 +59,20 @@ export interface PrivacySettings {
 
 export interface ModelSelectionSettings {
   profile: ModelSelectionProfile;
+  /**
+   * Ordem de tentativa dos provedores (primeiro = maior prioridade).
+   * Substitui `preferredProvider`.
+   */
+  providerPriority: LlmRouteTarget[];
+  /** @deprecated Use providerPriority[0]. Mantido só para migração de settings antigos. */
   preferredProvider?: LlmRouteTarget;
+  /** Se true, tenta o próximo da prioridade quando o atual falha ou está indisponível. */
   allowFallback: boolean;
   customMode: CustomRoutingMode;
   customRoute: LlmRoute;
   customTaskKind: LlmTaskKind;
+  /** Modelo escolhido pelo usuário para cada tarefa do perfil Auto. */
+  autoRoutes?: Partial<Record<LlmTaskKind, LlmRoute>>;
 }
 
 export interface LlmSettingsPublic {
@@ -85,6 +94,9 @@ export interface LlmProviderTestResponse {
   ok: boolean;
   message: string;
   testedAtIso: string;
+  /** A chave foi aceita pelo provedor, mesmo que o modelo tenha falhado. */
+  keyValid?: boolean;
+  modelOk?: boolean;
 }
 
 export interface TokenUsageSessionResponse {

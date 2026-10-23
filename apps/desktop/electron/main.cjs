@@ -360,18 +360,15 @@ if (ownsInstance) app.whenReady().then(() => {
 
   translationSession = createTranslationSession({
     logger,
-    sttAdapter,
     llmProviderRegistry,
     localProvider,
     settingsStore,
     tokenUsageTracker,
     translationOverlayWindow,
     consentAuditStore,
-    meetingAudioArchive,
-    transcriptionPacksService,
     audioCaptureMeter,
     emitRendererEvent: emitToAllWindows,
-    getApiKey: () => settingsStore.getGeminiApiKey(),
+    getOpenAiApiKey: () => settingsStore.getProviderApiKey("openai"),
     getEffectiveFlags: () =>
       resolveFeatureFlags(settingsStore.getFeatureFlags(), envConfig).effective
   });
@@ -426,6 +423,7 @@ if (ownsInstance) app.whenReady().then(() => {
     tokenUsageTracker,
     meetingOrchestrator,
     translationSession,
+    translationOverlayWindow,
     audioLoopbackCapture,
     contextStore,
     consentAuditStore,

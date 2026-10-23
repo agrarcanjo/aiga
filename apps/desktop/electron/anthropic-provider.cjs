@@ -155,7 +155,32 @@ function createAnthropicProvider(options) {
     return true;
   }
 
-  return { streamAskResponse, testConnection };
+  async function listModels(apiKey) {
+    const fetchImpl = options?.fetchImpl || fetch;
+    const ids = [];
+    let afterId = "";
+    for (let page = 0; page < 10; page += 1) {
+      const url = new URL("https://api.anthropic.com/v1/models");
+      url.searchParams.set("limit", "1000");
+      if (afterId) url.searchParams.set("after_id", afterId);
+      const response = await fetchImpl(url, {
+        headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`HTTP ${response.status} ao listar modelos Anthropic: ${errText.slice(0, 200)}`);
+      }
+      const body = await response.json();
+      for (const model of body.data || []) {
+        if (model.id) ids.push(model.id);
+      }
+      if (!body.has_more || !body.last_id) break;
+      afterId = body.last_id;
+    }
+    return ids;
+  }
+
+  return { streamAskResponse, testConnection, listModels };
 }
 
 module.exports = { createAnthropicProvider };

@@ -1,15 +1,21 @@
 import { useEffect, useState } from "react";
 import type { TranslationLineEvent, TranslationPrefs } from "@clone-perssua/shared-types";
 
+interface PartialEntry {
+  itemId: string;
+  text: string;
+}
+
 export function TranslationOverlayView(): JSX.Element {
   const [lines, setLines] = useState<TranslationLineEvent[]>([]);
+  const [partial, setPartial] = useState<PartialEntry | null>(null);
   const [prefs, setPrefs] = useState<TranslationPrefs>({
-    sourceLanguage: "auto",
+    sourceLanguage: "en",
     targetLanguage: "pt",
     overlayFontSize: 16,
     overlayOpacity: 0.92,
     historyLines: 6,
-    overlayEnabled: true,
+    overlayEnabled: false,
   });
   const [avgLatencyMs, setAvgLatencyMs] = useState(0);
 
@@ -20,9 +26,21 @@ export function TranslationOverlayView(): JSX.Element {
       }
     });
 
-    const unsub = window.desktopApi.onTranslationLine((line) => {
+    const unsubPartial = window.desktopApi.onTranslationPartial((ev) => {
+      setPartial((prev) => {
+        if (!ev.text) {
+          return prev?.itemId === ev.itemId ? null : prev;
+        }
+        return { itemId: ev.itemId, text: ev.text };
+      });
+    });
+
+    const unsubLine = window.desktopApi.onTranslationLine((line) => {
       setLines((prev) => [line, ...prev].slice(0, prefs.historyLines || 6));
       setAvgLatencyMs(line.latencyMs);
+      if (line.itemId) {
+        setPartial((prev) => (prev?.itemId === line.itemId ? null : prev));
+      }
     });
 
     const poll = setInterval(() => {
@@ -34,7 +52,8 @@ export function TranslationOverlayView(): JSX.Element {
     }, 2500);
 
     return () => {
-      unsub();
+      unsubPartial();
+      unsubLine();
       clearInterval(poll);
     };
   }, [prefs.historyLines]);
@@ -65,12 +84,25 @@ export function TranslationOverlayView(): JSX.Element {
         <span>AIGA · Legendas</span>
         <span>~{avgLatencyMs} ms</span>
       </div>
-      {lines.length === 0 ? (
+      {partial && (
+        <p
+          style={{
+            color: "#9a9a9a",
+            fontSize: Math.max(12, prefs.overlayFontSize - 2),
+            fontStyle: "italic",
+            lineHeight: 1.4,
+            margin: "0 0 8px",
+          }}
+        >
+          {partial.text}
+        </p>
+      )}
+      {lines.length === 0 && !partial ? (
         <p style={{ color: "#666", fontSize: prefs.overlayFontSize, margin: 0 }}>Aguardando áudio…</p>
       ) : (
         lines.map((line, idx) => (
           <p
-            key={`${line.emittedAtIso}-${idx}`}
+            key={line.itemId || `${line.emittedAtIso}-${idx}`}
             style={{
               color: "#f0f0f0",
               fontSize: prefs.overlayFontSize,

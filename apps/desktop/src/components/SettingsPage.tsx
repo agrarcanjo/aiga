@@ -87,6 +87,9 @@ function inputStyle(): React.CSSProperties {
     fontFamily: "inherit",
     width: "100%",
     boxSizing: "border-box",
+    // Electron + user-select:none no root fecha <select> nativo ao abrir
+    userSelect: "auto",
+    WebkitUserSelect: "auto",
   };
 }
 
@@ -199,6 +202,7 @@ export function SettingsPage({
 
   const [nonStealthModeEnabled, setNonStealthModeEnabled] = useState(false);
   const [defaultCodeLanguage, setDefaultCodeLanguage] = useState("java");
+  const [chatFontSize, setChatFontSize] = useState(14);
   const [generalStatus, setGeneralStatus] = useState("");
 
   const [audioDevices, setAudioDevices] = useState<{ deviceId: string; label: string }[]>([]);
@@ -233,6 +237,7 @@ export function SettingsPage({
     const r = await window.desktopApi.getSettings();
     setNonStealthModeEnabled(Boolean(r.settings.nonStealthModeEnabled));
     setDefaultCodeLanguage(r.settings.defaultCodeLanguage || "java");
+    setChatFontSize(r.settings.chatFontSize || 14);
     setCaptureShortcut(r.settings.shortcuts.captureScreen);
     setCompatShortcut(r.settings.shortcuts.captureCompatibility ?? "");
     setPushToTalkShortcut(r.settings.shortcuts.pushToTalk);
@@ -335,6 +340,7 @@ export function SettingsPage({
     await window.desktopApi.saveSettings({
       nonStealthModeEnabled,
       defaultCodeLanguage,
+      chatFontSize,
     });
     setGeneralStatus("Configurações gerais salvas.");
     onSettingsChanged?.();
@@ -524,6 +530,18 @@ export function SettingsPage({
                   </option>
                 ))}
               </select>
+              <label style={{ color: C.textMuted, fontSize: 12 }}>
+                Tamanho da fonte do chat / legendas: {chatFontSize}px
+              </label>
+              <input
+                type="range"
+                min={11}
+                max={22}
+                step={1}
+                value={chatFontSize}
+                onChange={(e) => setChatFontSize(Number(e.target.value))}
+                style={{ width: "100%", accentColor: C.accent }}
+              />
               <label style={{ color: C.textMuted, fontSize: 12 }}>
                 Opacidade stealth: {Math.round(opacity * 100)}%
               </label>

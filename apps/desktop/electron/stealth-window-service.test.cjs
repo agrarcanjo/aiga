@@ -7,6 +7,7 @@ function setup() {
   let visible = true, minimized = false;
   const win = {
     isDestroyed: () => false, isVisible: () => visible, isMinimized: () => minimized,
+    isFocused: () => false, isAlwaysOnTop: () => calls.some((c) => c[0] === "top" && c[1] === true),
     setContentProtection: value => calls.push(["protection", value]),
     setAlwaysOnTop: value => calls.push(["top", value]),
     setSkipTaskbar() {}, setOpacity() {}, setIgnoreMouseEvents() {}, flashFrame() {}, setProgressBar() {},
@@ -21,6 +22,31 @@ test("visible stealth stays on top without stealing focus or removing protection
   const { service, calls } = setup();
   service.setStealthMode({ enabled: true, hardening: "safe" });
   calls.length = 0;
+  service.ensureVisibleOnTop();
+  assert.deepEqual(calls, [["top", true], ["move"]]);
+});
+
+test("maintenance skip moveTop while window is focused (native select)", () => {
+  const calls = [];
+  let focused = true;
+  const win = {
+    isDestroyed: () => false, isVisible: () => true, isMinimized: () => false,
+    isFocused: () => focused, isAlwaysOnTop: () => true,
+    setContentProtection() {}, setAlwaysOnTop: value => calls.push(["top", value]),
+    setSkipTaskbar() {}, setOpacity() {}, setIgnoreMouseEvents() {}, flashFrame() {}, setProgressBar() {},
+    restore() {}, show() {}, showInactive() {}, hide() {}, focus: () => calls.push(["focus"]),
+    moveTop: () => calls.push(["move"]),
+  };
+  const service = createStealthWindowService({
+    getMainWindow: () => win,
+    schedule: () => {},
+    logger: { info() {}, debug() {}, warn() {}, error() {} }
+  });
+  service.setStealthMode({ enabled: true, hardening: "safe" });
+  calls.length = 0;
+  service.ensureVisibleOnTop();
+  assert.deepEqual(calls, []);
+  focused = false;
   service.ensureVisibleOnTop();
   assert.deepEqual(calls, [["top", true], ["move"]]);
 });

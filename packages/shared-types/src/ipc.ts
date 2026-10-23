@@ -30,6 +30,7 @@ import type {
 } from "./meeting";
 import type {
   TranslationLineEvent,
+  TranslationPartialEvent,
   TranslationPrefs,
   TranslationSessionStartRequest,
   TranslationSessionStartResponse,
@@ -60,6 +61,7 @@ export type {
   MeetingPrefs,
   TeamMemoryListResponse,
   TranslationLineEvent,
+  TranslationPartialEvent,
   TranslationPrefs,
   TranslationSessionStatusResponse,
   TranslationSessionStartRequest,
@@ -128,7 +130,8 @@ export const IPC_CHANNELS = {
   translationSessionStart: "translation:session:start",
   translationSessionStop: "translation:session:stop",
   translationSessionStatus: "translation:session:status",
-  translationChunkIngest: "translation:chunk:ingest",
+  translationAudioFrame: "translation:audio:frame",
+  translationPartial: "translation:partial",
   translationLine: "translation:line",
   translationError: "translation:error"
 } as const;
@@ -344,6 +347,8 @@ export interface AppSettings {
   nonStealthModeEnabled: boolean;
   /** Linguagem padrão para soluções de código (ex.: java). */
   defaultCodeLanguage: string;
+  /** Tamanho da fonte do chat / legendas integradas (px). */
+  chatFontSize?: number;
   selectedAudioInputDeviceId?: string;
   selectedAudioInputDeviceLabel?: string;
   shortcuts: {
@@ -611,6 +616,7 @@ export interface SettingsSaveRequest {
   quickScreenshotAnalysis?: boolean;
   nonStealthModeEnabled?: boolean;
   defaultCodeLanguage?: string;
+  chatFontSize?: number;
   selectedAudioInputDeviceId?: string | null;
   selectedAudioInputDeviceLabel?: string | null;
   shortcuts?: {
@@ -936,7 +942,11 @@ export interface DesktopApi {
   ): Promise<TranslationSessionStartResponse & { captureMode?: string }>;
   stopTranslationSession(): Promise<TranslationSessionStopResponse>;
   getTranslationSessionStatus(): Promise<TranslationSessionStatusResponse>;
-  ingestTranslationMicChunk(payload: { chunkBase64: string }): Promise<{ ok: boolean }>;
+  /** PCM16 mono 24 kHz; fire-and-forget. */
+  sendTranslationAudioFrame(buffer: ArrayBuffer): void;
+  onTranslationPartial(listener: (payload: TranslationPartialEvent) => void): () => void;
+  setTranslationOverlayVisible(payload: { visible: boolean }): Promise<{ visible: boolean }>;
+  getTranslationOverlayVisible(): Promise<{ visible: boolean }>;
   onTranslationLine(listener: (payload: TranslationLineEvent) => void): () => void;
   onTranslationError(listener: (payload: TranslationErrorEvent) => void): () => void;
 }

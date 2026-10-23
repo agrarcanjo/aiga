@@ -105,8 +105,17 @@ function createSttAdapter(dependencies) {
     return transcribeWithCloud(params);
   }
 
+  async function warmUp(params = {}) {
+    if (!whisperCliManager?.warmUp) {
+      return { ok: false };
+    }
+    await whisperCliManager.warmUp({ language: params.language || "en" });
+    return { ok: true };
+  }
+
   return {
-    transcribe
+    transcribe,
+    warmUp
   };
 }
 

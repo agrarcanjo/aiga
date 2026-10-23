@@ -80,9 +80,36 @@ function createGeminiProvider(options) {
     return true;
   }
 
+  async function listModels(apiKey) {
+    const fetchImpl = options.fetchImpl || fetch;
+    const ids = [];
+    let pageToken = "";
+    for (let page = 0; page < 10; page += 1) {
+      const url = new URL("https://generativelanguage.googleapis.com/v1beta/models");
+      url.searchParams.set("pageSize", "1000");
+      if (pageToken) url.searchParams.set("pageToken", pageToken);
+      const response = await fetchImpl(url, { headers: { "x-goog-api-key": apiKey } });
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`HTTP ${response.status} ao listar modelos Gemini: ${errText.slice(0, 200)}`);
+      }
+      const body = await response.json();
+      for (const model of body.models || []) {
+        const methods = model.supportedGenerationMethods || [];
+        if (model.name && (!methods.length || methods.includes("generateContent"))) {
+          ids.push(String(model.name).replace(/^models\//, ""));
+        }
+      }
+      pageToken = body.nextPageToken || "";
+      if (!pageToken) break;
+    }
+    return ids;
+  }
+
   return {
     streamAskResponse,
-    testConnection
+    testConnection,
+    listModels
   };
 }
 

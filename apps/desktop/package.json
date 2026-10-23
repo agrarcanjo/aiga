@@ -9,7 +9,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test electron/**/*.test.cjs",
+    "test": "node --test electron/**/*.test.cjs src/**/*.test.mjs",
     "test:e2e": "node --test electron/**/*.e2e.test.cjs",
     "build:capture-compat": "powershell -NoProfile -ExecutionPolicy Bypass -File native/capture-compat/build.ps1",
     "test:capture-compat": "node native/capture-compat/test-native.cjs",

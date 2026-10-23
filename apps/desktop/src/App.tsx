@@ -83,6 +83,7 @@ export function App(): JSX.Element {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [chatFontSize, setChatFontSize] = useState(14);
 
   // ── Screenshot state ────────────────────────────────────────────────────
   const [screenshotQueue, setScreenshotQueue] = useState<ScreenshotQueueItem[]>([]);
@@ -228,6 +229,7 @@ export function App(): JSX.Element {
       const quick = r.settings.quickScreenshotAnalysis !== false;
       quickAnalysisRef.current = quick;
       setQuickAnalysis(quick);
+      setChatFontSize(r.settings.chatFontSize || 14);
       setCaptureShortcut(r.settings.shortcuts.captureScreen);
       setPushToTalkShortcut(r.settings.shortcuts.pushToTalk);
       const llm = await window.desktopApi.getLlmSettings();
@@ -642,7 +644,8 @@ export function App(): JSX.Element {
           fontFamily: "'Segoe UI', system-ui, sans-serif",
           fontSize: 13,
           overflow: "hidden",
-          userSelect: "none",
+          // NÃO use userSelect:none no root — no Electron isso fecha <select> nativo ao abrir.
+          userSelect: "text",
         }}
       >
         {/* ── Topbar / drag region ──────────────────────────────────── */}
@@ -917,42 +920,67 @@ export function App(): JSX.Element {
 
         {compatibilityMessage && <div role="status" aria-live="polite" style={{ padding: "8px 12px", fontSize: 12, color: C.text }}><span>{compatibilityMessage}</span><button type="button" aria-label="Fechar aviso" onClick={() => setCompatibilityMessage("")}>×</button></div>}
         {settingsOpen ? (
-          <SettingsPage
-            initialTab={settingsTab}
-            onClose={() => setSettingsOpen(false)}
-            opacity={opacity}
-            onOpacityChange={(v) => void handleSetOpacity(v)}
-            autoScroll={autoScroll}
-            onAutoScrollChange={setAutoScroll}
-            selectToPrompt={selectToPrompt}
-            onSelectToPromptChange={setSelectToPrompt}
-            quickAnalysis={quickAnalysis}
-            onQuickAnalysisChange={(enabled) => void handleQuickAnalysisChange(enabled)}
-            onSettingsChanged={() => void loadSettings()}
-          />
+          <div
+            style={
+              {
+                flex: 1,
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
+                // selects/inputs quebram com user-select:none + drag do Electron
+                userSelect: "text",
+                WebkitUserSelect: "text",
+                WebkitAppRegion: "no-drag",
+              } as React.CSSProperties
+            }
+          >
+            <SettingsPage
+              initialTab={settingsTab}
+              onClose={() => setSettingsOpen(false)}
+              opacity={opacity}
+              onOpacityChange={(v) => void handleSetOpacity(v)}
+              autoScroll={autoScroll}
+              onAutoScrollChange={setAutoScroll}
+              selectToPrompt={selectToPrompt}
+              onSelectToPromptChange={setSelectToPrompt}
+              quickAnalysis={quickAnalysis}
+              onQuickAnalysisChange={(enabled) => void handleQuickAnalysisChange(enabled)}
+              onSettingsChanged={() => void loadSettings()}
+            />
+          </div>
         ) : appMode === "meeting" ? (
           <div
-            style={{
-              flex: 1,
-              overflowY: "auto",
-              padding: chatExpanded ? "16px 20px" : "10px 12px",
-              display: "flex",
-              flexDirection: "column",
-              minHeight: 0,
-            }}
+            style={
+              {
+                flex: 1,
+                overflowY: "auto",
+                padding: chatExpanded ? "16px 20px" : "10px 12px",
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 0,
+                userSelect: "text",
+                WebkitUserSelect: "text",
+                WebkitAppRegion: "no-drag",
+              } as React.CSSProperties
+            }
           >
             <MeetingModePanel stealthEnabled={stealthEnabled} expanded={chatExpanded} />
           </div>
         ) : appMode === "translation" ? (
           <div
-            style={{
-              flex: 1,
-              overflowY: "auto",
-              padding: chatExpanded ? "16px 20px" : "10px 12px",
-              display: "flex",
-              flexDirection: "column",
-              minHeight: 0,
-            }}
+            style={
+              {
+                flex: 1,
+                overflowY: "auto",
+                padding: chatExpanded ? "16px 20px" : "10px 12px",
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 0,
+                userSelect: "text",
+                WebkitUserSelect: "text",
+                WebkitAppRegion: "no-drag",
+              } as React.CSSProperties
+            }
           >
             <TranslationModePanel stealthEnabled={stealthEnabled} expanded={chatExpanded} />
           </div>
@@ -1008,7 +1036,7 @@ export function App(): JSX.Element {
                     : "12px 12px 12px 2px",
                 padding: "8px 12px",
                 lineHeight: 1.55,
-                fontSize: 13,
+                fontSize: chatFontSize,
                 userSelect: "text",
               }}
             >

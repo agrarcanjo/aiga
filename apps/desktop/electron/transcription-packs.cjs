@@ -69,9 +69,9 @@ const MODEL_TIERS = [
   },
   {
     id: "small",
-    label: "Whisper Small",
+    label: "Whisper Small (recomendado p/ live)",
     modelKey: "whisper-small",
-    description: "Melhor qualidade (~466 MB).",
+    description: "Equilíbrio qualidade/latência para legendas ao vivo (~466 MB).",
     approximateSizeMb: 466
   },
   {
@@ -221,8 +221,9 @@ function createTranscriptionPacksService(options) {
     emitProgress({
       kind: "engine",
       status: "downloading",
-      message: "Instalando whisper-cli automaticamente…"
+      message: "Instalando whisper-cli + DLLs (whisper.dll)…"
     });
+    // force: remove instalacao incompleta (exe sem whisper.dll misturado com llama).
     const installed = await whisperCliInstaller.installPortable((info) => {
       downloadPercent = typeof info?.percent === "number" ? info.percent : null;
       emitProgress({
@@ -231,7 +232,7 @@ function createTranscriptionPacksService(options) {
         message: info?.message || "Baixando whisper-cli…",
         percent: downloadPercent
       });
-    });
+    }, { force: true });
     if (!installed.available) {
       throw new Error(installed.lastError || "Falha ao instalar whisper-cli.");
     }

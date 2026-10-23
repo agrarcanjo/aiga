@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import type { TranslationLanguageCode, TranslationPrefs } from "@clone-perssua/shared-types";
+import { buildModelOptions } from "../lib/modelOptions";
+import { ModelCombobox } from "./ModelCombobox";
 import { TranscriptionPacksSettings } from "./TranscriptionPacksSettings";
 
 const C = {
@@ -9,17 +11,17 @@ const C = {
   border: "#2e2e2e",
 };
 
-const LANG_OPTIONS: { value: TranslationLanguageCode; label: string }[] = [
-  { value: "auto", label: "Automático" },
+const SOURCE_OPTIONS: { value: TranslationLanguageCode; label: string }[] = [
   { value: "en", label: "Inglês" },
   { value: "pt", label: "Português" },
   { value: "es", label: "Espanhol" },
   { value: "fr", label: "Francês" },
   { value: "de", label: "Alemão" },
   { value: "it", label: "Italiano" },
+  { value: "auto", label: "Automático" },
 ];
 
-const TARGET_OPTIONS = LANG_OPTIONS.filter((o) => o.value !== "auto");
+const TARGET_OPTIONS = SOURCE_OPTIONS.filter((option) => option.value !== "auto");
 
 interface TranslationSettingsProps {
   inputStyle: React.CSSProperties;
@@ -33,14 +35,18 @@ export function TranslationSettings({
   secondaryBtn,
 }: TranslationSettingsProps): JSX.Element {
   const [prefs, setPrefs] = useState<TranslationPrefs>({
-    sourceLanguage: "auto",
+    sourceLanguage: "en",
     targetLanguage: "pt",
     overlayFontSize: 14,
     overlayOpacity: 0.92,
     historyLines: 8,
-    overlayEnabled: true,
+    realtimeModel: "gpt-realtime-1.5",
+    transcriptionModel: "gpt-4o-mini-transcribe",
+    overlayEnabled: false,
   });
   const [status, setStatus] = useState("");
+  const [openaiModels, setOpenaiModels] = useState<string[] | undefined>();
+  const [loadingModels, setLoadingModels] = useState(false);
 
   useEffect(() => {
     void window.desktopApi.getSettings().then((r) => {
@@ -48,39 +54,50 @@ export function TranslationSettings({
         setPrefs(r.settings.translationPrefs);
       }
     });
+    void window.desktopApi.getLlmSettings().then(async (result) => {
+      if (!result.llm.providers.openai.hasApiKey) return;
+      setLoadingModels(true);
+      try {
+        const listed = await window.desktopApi.listLlmProviderModels("openai");
+        if (listed.ok !== false) setOpenaiModels(listed.modelIds);
+      } finally {
+        setLoadingModels(false);
+      }
+    });
   }, []);
 
   async function save(): Promise<void> {
-    await window.desktopApi.saveSettings({ translationPrefs: prefs });
+    await window.desktopApi.saveSettings({
+      translationPrefs: { ...prefs, overlayEnabled: false },
+    });
     setStatus("Preferências de tradução salvas.");
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <p style={{ color: C.textMuted, fontSize: 12, margin: 0, lineHeight: 1.5 }}>
-        Padrões do modo legendas ao vivo (idiomas, overlay flutuante e histórico na UI).
-      </p>
-      <label style={{ color: C.textMuted, fontSize: 12 }}>Idioma origem padrão</label>
+      <label style={{ color: C.textMuted, fontSize: 12 }}>Idioma origem</label>
       <select
-        value={prefs.sourceLanguage}
+        value={prefs.sourceLanguage || "en"}
         onChange={(e) =>
           setPrefs({ ...prefs, sourceLanguage: e.target.value as TranslationLanguageCode })
         }
-        style={inputStyle}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{ ...inputStyle, userSelect: "auto", WebkitUserSelect: "auto" } as React.CSSProperties}
       >
-        {LANG_OPTIONS.map((o) => (
+        {SOURCE_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
         ))}
       </select>
-      <label style={{ color: C.textMuted, fontSize: 12 }}>Idioma destino padrão</label>
+      <label style={{ color: C.textMuted, fontSize: 12 }}>Idioma destino</label>
       <select
         value={prefs.targetLanguage}
         onChange={(e) =>
           setPrefs({ ...prefs, targetLanguage: e.target.value as TranslationLanguageCode })
         }
-        style={inputStyle}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{ ...inputStyle, userSelect: "auto", WebkitUserSelect: "auto" } as React.CSSProperties}
       >
         {TARGET_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
@@ -88,16 +105,43 @@ export function TranslationSettings({
           </option>
         ))}
       </select>
-      <label style={{ display: "flex", gap: 8, fontSize: 12, color: C.text }}>
-        <input
-          type="checkbox"
-          checked={prefs.overlayEnabled !== false}
-          onChange={(e) => setPrefs({ ...prefs, overlayEnabled: e.target.checked })}
-        />
-        Abrir overlay always-on-top durante sessão
-      </label>
+      <label style={{ color: C.textMuted, fontSize: 12 }}>Modelo da sessão Realtime</label>
+      <p style={{ color: C.textMuted, fontSize: 11, margin: 0, lineHeight: 1.45 }}>
+        A OpenAI exige este modelo na conexão. O exemplo atual é{" "}
+        <code>gpt-realtime-1.5</code>. Quando a conta mudar, pesquise o novo id aqui ou digite-o
+        e escolha “Usar”.
+      </p>
+      <ModelCombobox
+        ariaLabel="Modelo da sessão Realtime"
+        value={prefs.realtimeModel || "gpt-realtime-1.5"}
+        loading={loadingModels}
+        options={buildModelOptions(
+          ["gpt-realtime-1.5"],
+          openaiModels,
+          prefs.realtimeModel || "gpt-realtime-1.5",
+          { includeAll: true }
+        )}
+        onChange={(realtimeModel) => setPrefs({ ...prefs, realtimeModel })}
+      />
+      <label style={{ color: C.textMuted, fontSize: 12 }}>Modelo de transcrição</label>
+      <p style={{ color: C.textMuted, fontSize: 11, margin: 0, lineHeight: 1.45 }}>
+        Transforma o áudio em texto. Escolha um modelo de transcrição da conta, como{" "}
+        <code>gpt-4o-mini-transcribe</code> ou o sucessor indicado pela OpenAI.
+      </p>
+      <ModelCombobox
+        ariaLabel="Modelo de transcrição"
+        value={prefs.transcriptionModel || "gpt-4o-mini-transcribe"}
+        loading={loadingModels}
+        options={buildModelOptions(
+          ["gpt-4o-mini-transcribe"],
+          openaiModels,
+          prefs.transcriptionModel || "gpt-4o-mini-transcribe",
+          { includeAll: true }
+        )}
+        onChange={(transcriptionModel) => setPrefs({ ...prefs, transcriptionModel })}
+      />
       <label style={{ color: C.textMuted, fontSize: 12 }}>
-        Tamanho da fonte no overlay: {prefs.overlayFontSize}px
+        Tamanho da fonte no overlay flutuante: {prefs.overlayFontSize}px
       </label>
       <input
         type="range"
@@ -133,6 +177,10 @@ export function TranslationSettings({
       {status && <span style={{ color: C.success, fontSize: 12 }}>{status}</span>}
 
       <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16, marginTop: 8 }}>
+        <p style={{ color: C.textMuted, fontSize: 12, margin: "0 0 12px", lineHeight: 1.5 }}>
+          Os pacotes Whisper abaixo são usados na transcrição de reuniões gravadas (local, sem
+          tempo real), não nas legendas ao vivo.
+        </p>
         <TranscriptionPacksSettings
           inputStyle={inputStyle}
           primaryBtn={primaryBtn}

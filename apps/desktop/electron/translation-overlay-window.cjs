@@ -60,22 +60,25 @@ function createTranslationOverlayWindow(dependencies) {
     return overlayWindow;
   }
 
-  function show() {
+  function show(options = {}) {
+    // Sempre recria a janela para abrir com contexto vazio.
+    if (options.clear !== false) {
+      destroy();
+    }
     const win = createWindow();
     applyOverlayStealthProfile(
       win,
       typeof getStealthHardening === "function" ? getStealthHardening() : "safe"
     );
     if (!win.isVisible()) {
-      win.show();
+      win.showInactive();
     }
     return win;
   }
 
   function hide() {
-    if (overlayWindow && !overlayWindow.isDestroyed()) {
-      overlayWindow.hide();
-    }
+    // Destrói para a próxima abertura não herdar legendas antigas.
+    destroy();
   }
 
   function destroy() {

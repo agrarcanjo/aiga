@@ -19,23 +19,64 @@ const DEFAULT_PRIVACY = {
   retentionDays: 7
 };
 
+const DEFAULT_PROVIDER_PRIORITY = ["openai", "gemini", "anthropic"];
+
 const DEFAULT_MODEL_SELECTION = {
   profile: "auto",
+  providerPriority: [...DEFAULT_PROVIDER_PRIORITY],
   preferredProvider: "openai",
   allowFallback: true,
   customMode: "model",
   customRoute: { providerId: "openai", modelId: "gpt-5.6-terra" },
-  customTaskKind: "screenshot_general"
+  customTaskKind: "screenshot_general",
+  autoRoutes: {}
 };
 
+const VALID_ROUTE_TARGETS = ["openai", "gemini", "anthropic", "local"];
+
+/**
+ * Normaliza a lista de prioridade (única, válida).
+ * Migra settings antigos que só tinham preferredProvider.
+ */
+function normalizeProviderPriority(selection = {}) {
+  const defaults = [...DEFAULT_PROVIDER_PRIORITY];
+  let list = Array.isArray(selection.providerPriority) ? selection.providerPriority.slice() : [];
+  if (list.length === 0 && selection.preferredProvider) {
+    list = [
+      selection.preferredProvider,
+      ...defaults.filter((id) => id !== selection.preferredProvider)
+    ];
+  }
+  if (list.length === 0) {
+    list = defaults.slice();
+  }
+
+  const seen = new Set();
+  const normalized = [];
+  for (const id of list) {
+    if (!VALID_ROUTE_TARGETS.includes(id) || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    normalized.push(id);
+  }
+  for (const id of defaults) {
+    if (!seen.has(id)) {
+      normalized.push(id);
+    }
+  }
+  return normalized;
+}
+
 const MODEL_CATALOG = {
-  gemini: ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"],
+  gemini: ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.5-pro"],
   openai: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra", "gpt-4o-mini", "gpt-4o"],
   anthropic: ["claude-3-5-haiku-latest", "claude-sonnet-4-20250514"]
 };
 
 // Modelos retirados pela Google: remapeados no load para evitar 404 em settings antigos.
 const DEPRECATED_MODEL_REPLACEMENTS = {
+  "gemini-2.5-flash": "gemini-3.5-flash",
   "gemini-2.5-flash-lite": "gemini-3.5-flash-lite",
   "gemini-2.0-flash": "gemini-3.5-flash",
   "gemini-2.0-flash-lite": "gemini-3.5-flash-lite",
@@ -58,8 +99,11 @@ module.exports = {
   DEFAULT_TOKEN_BUDGET,
   DEFAULT_PRIVACY,
   DEFAULT_MODEL_SELECTION,
+  DEFAULT_PROVIDER_PRIORITY,
   MODEL_CATALOG,
   DEFAULT_LLM_PROVIDERS,
   DEPRECATED_MODEL_REPLACEMENTS,
-  replaceDeprecatedModelId
+  replaceDeprecatedModelId,
+  normalizeProviderPriority,
+  VALID_ROUTE_TARGETS
 };

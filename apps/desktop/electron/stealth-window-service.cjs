@@ -392,6 +392,17 @@ function createStealthWindowService(dependencies) {
     if (!win || win.isDestroyed()) return;
     const before = force ? getWindowDiagnostics() : null;
     if (!force && (!isStealthEnabled || isFullStealthActive || currentHardening === "off" || !win.isVisible() || win.isMinimized())) return;
+    // Com a janela focada (ex.: <select> nativo aberto), moveTop() fecha o dropdown no Windows.
+    if (!force && typeof win.isFocused === "function" && win.isFocused()) {
+      if (typeof win.isAlwaysOnTop === "function" && !win.isAlwaysOnTop()) {
+        try {
+          win.setAlwaysOnTop(true, "screen-saver");
+        } catch {
+          // ignore
+        }
+      }
+      return;
+    }
     if (!force && Date.now() - lastTopRefresh < 250) return;
     lastTopRefresh = Date.now();
     try {

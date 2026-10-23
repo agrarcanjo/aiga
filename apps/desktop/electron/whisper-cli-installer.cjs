@@ -31,15 +31,21 @@ function getLegacyWhisperCliPath() {
   return path.join(app.getPath("userData"), "runtime", binaryName);
 }
 
-// whisper-cli.exe depende das DLLs do pacote (ggml*, whisper); sem elas o processo sai com 0xC0000135.
+/**
+ * whisper-cli.exe exige whisper.dll (+ ggml*) no MESMO diretório.
+ * Qualquer .dll (ex.: pasta misturada com llama) NÃO conta — senão o processo
+ * sai com 0xC0000135 (STATUS_DLL_NOT_FOUND / 3221225781).
+ */
 function hasRuntimeLibraries(binaryPath) {
   if (process.platform !== "win32") {
     return true;
   }
   try {
-    return fs
-      .readdirSync(path.dirname(binaryPath))
-      .some((name) => name.toLowerCase().endsWith(".dll"));
+    const dir = path.dirname(binaryPath);
+    const names = fs.readdirSync(dir).map((n) => n.toLowerCase());
+    const hasWhisperDll = names.includes("whisper.dll");
+    const hasGgml = names.some((n) => n === "ggml.dll" || n.startsWith("ggml-"));
+    return hasWhisperDll && hasGgml;
   } catch {
     return false;
   }
@@ -173,7 +179,25 @@ function createWhisperCliInstaller(options) {
     };
   }
 
-  async function installPortable(onProgress) {
+  function removeBrokenLegacyBinary() {
+    const legacy = getLegacyWhisperCliPath();
+    try {
+      if (fs.existsSync(legacy) && !hasRuntimeLibraries(legacy)) {
+        fs.unlinkSync(legacy);
+        logger.warn("Removed incomplete legacy whisper-cli.exe (missing whisper.dll)", {
+          path: legacy
+        });
+      }
+    } catch (error) {
+      logger.warn("Could not remove legacy whisper-cli", {
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  async function installPortable(onProgress, installOptions = {}) {
+    const force = Boolean(installOptions.force);
+
     if (process.platform !== "win32") {
       return {
         available: false,
@@ -193,8 +217,11 @@ function createWhisperCliInstaller(options) {
       };
     }
 
+    removeBrokenLegacyBinary();
+
     const existing = await detect();
-    if (existing.available) {
+    if (existing.available && !force) {
+      process.env.WHISPER_CLI_PATH = existing.path;
       return {
         ...existing,
         installState: "ready",
@@ -206,15 +233,16 @@ function createWhisperCliInstaller(options) {
     const zipPath = path.join(tempDir, "whisper-bin.zip");
     const extractDir = path.join(tempDir, "extracted");
     const destination = getManagedWhisperCliPath();
+    const targetDir = getManagedWhisperCliDir();
 
     try {
       ensureDirectory(tempDir);
       ensureDirectory(extractDir);
-      ensureDirectory(path.dirname(destination));
+      ensureDirectory(targetDir);
 
-      logger.info("whisper-cli install: downloading", { url: DEFAULT_WHISPER_CLI_ZIP_URL });
+      logger.info("whisper-cli install: downloading", { url: DEFAULT_WHISPER_CLI_ZIP_URL, force });
       if (typeof onProgress === "function") {
-        onProgress({ percent: 0, message: "Baixando whisper-cli…" });
+        onProgress({ percent: 0, message: "Baixando whisper-cli + DLLs…" });
       }
       await downloadToFile(DEFAULT_WHISPER_CLI_ZIP_URL, zipPath, onProgress);
 
@@ -228,23 +256,45 @@ function createWhisperCliInstaller(options) {
         throw new Error("whisper-cli.exe nao encontrado no pacote baixado.");
       }
 
-      // Copia todo o diretorio do binario para trazer as DLLs (ggml*, whisper, SDL2).
+      // Copia o diretório do binário (whisper.dll, ggml*, SDL2, etc.) para runtime/whisper/.
       const sourceDir = path.dirname(sourceBinary);
-      const targetDir = getManagedWhisperCliDir();
-      ensureDirectory(targetDir);
       for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
         if (!entry.isFile()) {
           continue;
         }
         fs.copyFileSync(path.join(sourceDir, entry.name), path.join(targetDir, entry.name));
       }
+
+      if (!hasRuntimeLibraries(destination)) {
+        throw new Error(
+          "Pacote extraido sem whisper.dll. Baixe novamente o runtime em Configuracoes > Traducao."
+        );
+      }
+
       process.env.WHISPER_CLI_PATH = destination;
+      removeBrokenLegacyBinary();
 
       const verified = await detect();
       if (!verified.available) {
         throw new Error(
           verified.lastError || "whisper-cli instalado mas nao foi encontrado no destino."
         );
+      }
+
+      // Sanity: o processo deve pelo menos carregar (help exit != DLL_NOT_FOUND).
+      const smoke = await new Promise((resolve) => {
+        const proc = spawn(destination, ["-h"], { windowsHide: true });
+        proc.on("error", (err) => resolve({ ok: false, detail: err.message }));
+        proc.on("close", (code) => {
+          if (code === 3221225781) {
+            resolve({ ok: false, detail: "DLLs ainda ausentes apos instalacao (0xC0000135)." });
+            return;
+          }
+          resolve({ ok: true, detail: `exit ${code}` });
+        });
+      });
+      if (!smoke.ok) {
+        throw new Error(smoke.detail);
       }
 
       logger.info("whisper-cli install: ready", { path: destination });
